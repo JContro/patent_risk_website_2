@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Patent Risk Website</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 800px; margin: 50px auto; padding: 20px; text-align: center; }
+        .header { margin-bottom: 40px; }
+        .buttons { display: flex; justify-content: center; gap: 20px; }
+        .btn { background: #007bff; color: white; border: none; padding: 15px 30px; font-size: 16px; cursor: pointer; border-radius: 5px; text-decoration: none; display: inline-block; }
+        .btn:hover { background: #0056b3; }
+        .btn.secondary { background: #6c757d; }
+        .btn.secondary:hover { background: #545b62; }
+        .description { margin: 40px 0; line-height: 1.6; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Welcome to Patent Risk Analysis</h1>
+        <p>A platform for analyzing patent risks and managing intellectual property.</p>
+    </div>
+    
+    <div class="buttons">
+        <a href="{% url 'login' %}" class="btn secondary">Log In</a>
+        <a href="{% url 'register' %}" class="btn">Register</a>
+    </div>
+    
+    <div class="description">
+        <h2>Features</h2>
+        <ul style="list-style: none; padding: 0;">
+            <li>✓ User registration with email verification</li>
+            <li>✓ Secure login and profile management</li>
+            <li>✓ Patent data exploration tools</li>
+            <li>✓ Risk assessment dashboards</li>
+        </ul>
+    </div>
+    
+    <footer style="margin-top: 50px; color: #666;">
+        <p>© 2025 Patent Risk Website. All rights reserved.</p>
+    </footer>
+</body>
+</html>

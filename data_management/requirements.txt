@@ -1,0 +1,11 @@
+# Google Cloud Client Library
+google-cloud-bigquery>=3.0.0
+
+# Support for converting BigQuery results to Pandas DataFrames
+db-dtypes>=1.0.0
+
+# Data manipulation and storage
+pandas>=2.0.0
+
+# Optional: Fast Parquet support (better for huge text files than CSV)
+pyarrow>=10.0.0
