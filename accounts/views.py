@@ -139,8 +139,14 @@ def custom_login(request):
 
 
 @login_required
+def dashboard(request):
+    """Dashboard with tabs for dashboard and search."""
+    return render(request, 'accounts/dashboard.html', {'user': request.user})
+
+@login_required
 def profile(request):
-    return render(request, 'accounts/profile.html', {'user': request.user})
+    # Keep for backward compatibility, redirect to dashboard
+    return redirect('dashboard')
 
 
 def resend_verification(request):
