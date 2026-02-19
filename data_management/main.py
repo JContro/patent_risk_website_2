@@ -13,7 +13,90 @@ import os
 import re
 import hashlib
 import glob
+import gzip
+import gc
 from datetime import datetime
+
+
+# Checkpoint partition size
+CHECKPOINT_PARTITION_SIZE = 1000
+
+
+def get_checkpoint_base_name(checkpoint_file):
+    """Get the base name for checkpoint partition files."""
+    return checkpoint_file.replace('.json', '')
+
+
+def save_partitioned_checkpoint(checkpoint_file, processed_files, all_patents, error=None):
+    """
+    Save checkpoint with partitioned and compressed patent data.
+    Each partition contains up to CHECKPOINT_PARTITION_SIZE patents and is gzip compressed.
+    """
+    base_name = get_checkpoint_base_name(checkpoint_file)
+    checkpoint_dir = os.path.dirname(checkpoint_file) or '.'
+    
+    # Remove old partition files
+    partition_num = 0
+    while True:
+        old_partition = os.path.join(checkpoint_dir, f"{os.path.basename(base_name)}_part{partition_num}.json.gz")
+        if os.path.exists(old_partition):
+            os.remove(old_partition)
+            partition_num += 1
+        else:
+            break
+    
+    # Save new partition files
+    for i in range(0, len(all_patents), CHECKPOINT_PARTITION_SIZE):
+        partition = all_patents[i:i + CHECKPOINT_PARTITION_SIZE]
+        partition_num = i // CHECKPOINT_PARTITION_SIZE
+        partition_file = os.path.join(checkpoint_dir, f"{os.path.basename(base_name)}_part{partition_num}.json.gz")
+        
+        with gzip.open(partition_file, 'wt', encoding='utf-8') as f:
+            json.dump(partition, f, ensure_ascii=False)
+    
+    # Save main checkpoint file (metadata only, no patents)
+    checkpoint_data = {
+        'processed_files': list(processed_files),
+        'total_patents': len(all_patents),
+        'partition_count': (len(all_patents) + CHECKPOINT_PARTITION_SIZE - 1) // CHECKPOINT_PARTITION_SIZE,
+        'partition_size': CHECKPOINT_PARTITION_SIZE,
+        'last_updated': datetime.now().isoformat()
+    }
+    if error:
+        checkpoint_data['last_error'] = str(error)
+    
+    with open(checkpoint_file, 'w', encoding='utf-8') as f:
+        json.dump(checkpoint_data, f, ensure_ascii=False)
+    
+    return len(all_patents)
+
+
+def load_partitioned_checkpoint(checkpoint_file):
+    """
+    Load checkpoint data and patents from partitioned checkpoint files.
+    Returns (processed_files, all_patents).
+    """
+    base_name = get_checkpoint_base_name(checkpoint_file)
+    checkpoint_dir = os.path.dirname(checkpoint_file) or '.'
+    
+    # Load main checkpoint file
+    with open(checkpoint_file, 'r', encoding='utf-8') as f:
+        checkpoint_data = json.load(f)
+    
+    processed_files = set(checkpoint_data.get('processed_files', []))
+    partition_count = checkpoint_data.get('partition_count', 0)
+    
+    # Load all partition files
+    all_patents = []
+    for i in range(partition_count):
+        partition_file = os.path.join(checkpoint_dir, f"{os.path.basename(base_name)}_part{i}.json.gz")
+        
+        if os.path.exists(partition_file):
+            with gzip.open(partition_file, 'rt', encoding='utf-8') as f:
+                partition = json.load(f)
+                all_patents.extend(partition)
+    
+    return processed_files, all_patents
 
 
 def extract_text(element):
@@ -671,6 +754,10 @@ def cpc_pattern_to_regex(pattern):
         "G06*"    →  matches anything in G06
         "A63F13/*" → matches A63F13/67, A63F13/58, etc.
     """
+    # Handle class_cpc.symbol: prefix (extract pattern after colon)
+    if ":" in pattern:
+        pattern = pattern.split(":", 1)[1]
+    
     # Escape regex-special chars, then convert '*' to '.*'
     escaped = re.escape(pattern).replace(r"\*", ".*")
     return re.compile(f"^{escaped}$", re.IGNORECASE)
@@ -687,6 +774,160 @@ def matches_cpc_search(patent_data, cpc_patterns):
             if pat.match(code):
                 return True
     return False
+
+
+# ---------------------------------------------------------------------------
+# Date Range, Document Type, and Jurisdiction Filtering
+# ---------------------------------------------------------------------------
+
+def parse_date(date_str):
+    """
+    Parse date string in various formats (YYYYMMDD, YYYY-MM-DD, MM/DD/YYYY).
+    Returns a datetime object or None if parsing fails.
+    """
+    if not date_str:
+        return None
+    
+    # Remove any non-digit characters except for the date separators
+    clean_date = re.sub(r'[^\d\-/]', '', date_str)
+    
+    formats = [
+        '%Y%m%d',      # 20210401
+        '%Y-%m-%d',    # 2021-04-01
+        '%m/%d/%Y',    # 04/01/2021
+        '%d/%m/%Y',    # 01/04/2021
+    ]
+    
+    for fmt in formats:
+        try:
+            return datetime.strptime(clean_date, fmt)
+        except ValueError:
+            continue
+    
+    return None
+
+
+def get_patent_date(patent_data):
+    """
+    Extract the publication date from patent data.
+    Returns a datetime object or None if not available.
+    """
+    # Try publication date first
+    if "publication" in patent_data and patent_data["publication"]:
+        pub_date = patent_data["publication"].get("date")
+        if pub_date:
+            parsed = parse_date(pub_date)
+            if parsed:
+                return parsed
+    
+    # Try application date
+    if "application" in patent_data and patent_data["application"]:
+        app_doc_id = patent_data["application"].get("document_id")
+        if app_doc_id and isinstance(app_doc_id, dict):
+            app_date = app_doc_id.get("date")
+            if app_date:
+                parsed = parse_date(app_date)
+                if parsed:
+                    return parsed
+    
+    return None
+
+
+def matches_date_range(patent_data, start_date=None, end_date=None):
+    """
+    Return True if the patent's date falls within the specified range.
+    start_date and end_date should be datetime objects or date strings.
+    """
+    patent_date = get_patent_date(patent_data)
+    if not patent_date:
+        return False
+    
+    # Parse start/end dates if they're strings
+    if isinstance(start_date, str):
+        start_date = parse_date(start_date)
+    if isinstance(end_date, str):
+        end_date = parse_date(end_date)
+    
+    if start_date and patent_date < start_date:
+        return False
+    if end_date and patent_date > end_date:
+        return False
+    
+    return True
+
+
+def get_patent_country(patent_data):
+    """
+    Extract the country code from patent data.
+    Returns the country code or None.
+    """
+    # Check attributes
+    if "attributes" in patent_data:
+        country = patent_data["attributes"].get("country")
+        if country:
+            return country.upper()
+    
+    # Check publication reference
+    if "publication" in patent_data and patent_data["publication"]:
+        country = patent_data["publication"].get("country")
+        if country:
+            return country.upper()
+    
+    return None
+
+
+def matches_jurisdiction(patent_data, jurisdiction):
+    """
+    Return True if the patent's country matches the specified jurisdiction.
+    """
+    if not jurisdiction:
+        return True
+    
+    patent_country = get_patent_country(patent_data)
+    if not patent_country:
+        return False
+    
+    return patent_country == jurisdiction.upper()
+
+
+def is_patent_grant(patent_data):
+    """
+    Return True if the patent is a granted patent (not an application).
+    """
+    # Check attributes for status
+    if "attributes" in patent_data:
+        status = patent_data["attributes"].get("status")
+        if status and status.lower() == "granted":
+            return True
+    
+    # Check if it's a us-patent-grant element (root tag would indicate this)
+    # The extraction function handles both, but we can check application type
+    if "application" in patent_data:
+        appl_type = patent_data["application"].get("appl_type")
+        # appl_type of "utility" typically indicates a granted patent
+        if appl_type and appl_type.lower() == "utility":
+            return True
+    
+    return False
+
+
+def matches_document_type(patent_data, doc_type):
+    """
+    Return True if the patent matches the specified document type.
+    Supported doc_type values: 'Granted_patent', 'Application'
+    """
+    if not doc_type:
+        return True
+    
+    doc_type_lower = doc_type.lower().replace("_", " ")
+    
+    if doc_type_lower in ["granted", "granted_patent", "patent"]:
+        return is_patent_grant(patent_data)
+    elif doc_type_lower in ["application", "patent application"]:
+        return not is_patent_grant(patent_data)
+    
+    # If unknown type, allow all
+    return True
 
 
 def collect_distinct_entities(patents):
@@ -841,10 +1082,18 @@ def load_patents_from_json(json_path):
         f"{json_path} does not contain a recognised patent JSON structure")
 
 
-def read_all_zips_sequential(data_dir, keywords=None):
+def read_all_zips_sequential(data_dir, keywords=None, checkpoint_file=None):
     """
     Discover all .zip files in *data_dir* and extract patents from each
     sequentially (one at a time) to keep memory usage low.
+
+    Uses checkpointing to save progress after each ZIP file is processed.
+    If interrupted, can resume from the last checkpoint.
+
+    Args:
+        data_dir: Directory containing ZIP files
+        keywords: Optional keywords to filter patents during extraction
+        checkpoint_file: Optional custom checkpoint file path
 
     Returns a tuple of (all_patents, source_files) where *all_patents* is
     the combined list of patent dicts and *source_files* is the list of
@@ -855,28 +1104,79 @@ def read_all_zips_sequential(data_dir, keywords=None):
         print(f"⚠️  No ZIP files found in {data_dir}")
         return [], []
 
+    # Default checkpoint file based on data directory
+    if checkpoint_file is None:
+        checkpoint_file = os.path.join(data_dir, ".extraction_checkpoint.json")
+
+    # Check for existing checkpoint
+    processed_files = set()
+    all_patents = []
+    
+    if os.path.exists(checkpoint_file):
+        print(f"\n📂 Found checkpoint file: {checkpoint_file}")
+        try:
+            processed_files, all_patents = load_partitioned_checkpoint(checkpoint_file)
+            print(f"  Resuming from checkpoint: {len(processed_files)} files already processed")
+            print(f"  Already extracted: {len(all_patents)} patents")
+        except (json.JSONDecodeError, IOError) as e:
+            print(f"  Warning: Could not load checkpoint file: {e}")
+            processed_files = set()
+
     print(f"\nFound {len(zip_files)} ZIP file(s) in {data_dir}:")
     for zf in zip_files:
         print(f"  • {os.path.basename(zf)}")
 
-    all_patents = []
-
+    # Filter out already processed files
+    remaining_files = [zf for zf in zip_files if os.path.basename(zf) not in processed_files]
     print(f"\nProcessing {len(zip_files)} ZIP files sequentially …")
+    if processed_files:
+        print(f"  (Skipping {len(processed_files)} already processed files)")
+
     for idx, zip_path in enumerate(zip_files, 1):
         zip_name = os.path.basename(zip_path)
+        
+        # Skip already processed files
+        if zip_name in processed_files:
+            print(f"\n[{idx}/{len(zip_files)}] Skipping {zip_name} (already processed)")
+            continue
+            
         print(f"\n[{idx}/{len(zip_files)}] Processing {zip_name} …")
         try:
             patents = read_xml_content(zip_path, keywords)
             print(f"  ✓ {zip_name}: {len(patents)} patents")
             all_patents.extend(patents)
+            
+            # Mark as processed
+            processed_files.add(zip_name)
+            
+            # Save checkpoint after each successful file (partitioned and compressed)
+            save_partitioned_checkpoint(checkpoint_file, processed_files, all_patents)
+            print(f"  ✓ Checkpoint saved ({len(all_patents)} total patents)")
+            
+            # Force garbage collection to free memory
+            gc.collect()
+            
         except Exception as e:
             print(f"  ✗ {zip_name}: Error – {e}")
+            # Save checkpoint even on error to preserve progress
+            save_partitioned_checkpoint(checkpoint_file, processed_files, all_patents, error=e)
+            print(f"  ✓ Checkpoint saved despite error ({len(all_patents)} total patents)")
+            # Continue to next file instead of stopping
+            continue
 
     print(f"\nTotal patents extracted from all ZIPs: {len(all_patents)}")
+    
+    # Clean up checkpoint file if all files processed
+    if len(processed_files) == len(zip_files):
+        if os.path.exists(checkpoint_file):
+            os.remove(checkpoint_file)
+            print(f"\n✓ All files processed, checkpoint file removed")
+    
     return all_patents, zip_files
 
 
-def run_search(patents, search_query, source_file, entity_query=None, cpc_query=None):
+def run_search(patents, search_query, source_file, entity_query=None, cpc_query=None,
+               start_date=None, end_date=None, document_type=None, jurisdiction=None):
     """
     Apply boolean search queries to a list of patent records.
 
@@ -884,6 +1184,9 @@ def run_search(patents, search_query, source_file, entity_query=None, cpc_query=
     description).  *entity_query* matches against entity names only
     (inventors, applicants, assignees/owners).  *cpc_query* is a
     comma-separated list of CPC code patterns with optional ``*`` wildcards.
+    *start_date* and *end_date* filter by patent date (datetime or string).
+    *document_type* filters by document type ('Granted_patent' or 'Application').
+    *jurisdiction* filters by country code (e.g., 'US').
     When multiple queries are supplied a patent must satisfy **all** of them.
 
     Save matching patents to ``search_<hash>.json`` and print a summary.
@@ -915,6 +1218,20 @@ def run_search(patents, search_query, source_file, entity_query=None, cpc_query=
         cpc_patterns = [cpc_pattern_to_regex(p) for p in raw_patterns]
         print(f"\nCPC patterns: {raw_patterns}")
 
+    # Parse date filters
+    parsed_start_date = None
+    parsed_end_date = None
+    if start_date:
+        parsed_start_date = parse_date(start_date) if isinstance(start_date, str) else start_date
+        print(f"\nDate range: {start_date} to {end_date or 'present'}")
+    if end_date:
+        parsed_end_date = parse_date(end_date) if isinstance(end_date, str) else end_date
+    
+    if document_type:
+        print(f"\nDocument type: {document_type}")
+    if jurisdiction:
+        print(f"\nJurisdiction: {jurisdiction}")
+
     # Filter patents — must match ALL supplied queries
     total_before = len(patents)
 
@@ -925,6 +1242,15 @@ def run_search(patents, search_query, source_file, entity_query=None, cpc_query=
             return False
         if cpc_patterns and not matches_cpc_search(p, cpc_patterns):
             return False
+        if parsed_start_date or parsed_end_date:
+            if not matches_date_range(p, parsed_start_date, parsed_end_date):
+                return False
+        if document_type:
+            if not matches_document_type(p, document_type):
+                return False
+        if jurisdiction:
+            if not matches_jurisdiction(p, jurisdiction):
+                return False
         return True
 
     matched = [p for p in patents if patent_matches(p)]
@@ -955,6 +1281,10 @@ def run_search(patents, search_query, source_file, entity_query=None, cpc_query=
         "search_query": search_query,
         "entity_query": entity_query,
         "cpc_query": cpc_query,
+        "start_date": start_date,
+        "end_date": end_date,
+        "document_type": document_type,
+        "jurisdiction": jurisdiction,
         "search_hash": qhash,
         "source_file": source_file,
         "total_searched": total_before,
@@ -1021,7 +1351,12 @@ def main():
         print('                   applicants, assignees/owners).  Same syntax as --search.')
         print("  --search-cpc     Comma-separated CPC code patterns with wildcard *.")
         print(
-            '                   A patent matches if ANY of its CPC codes match ANY pattern.')
+            '                   Supports class_cpc.symbol: syntax (e.g., class_cpc.symbol:G06N*).')
+        print('                   A patent matches if ANY of its CPC codes match ANY pattern.')
+        print('  --start-date     Filter patents from this date (MM/DD/YYYY, YYYY-MM-DD, or YYYYMMDD)')
+        print('  --end-date       Filter patents until this date (MM/DD/YYYY, YYYY-MM-DD, or YYYYMMDD)')
+        print('  --document-type  Filter by document type: Granted_patent or Application')
+        print('  --jurisdiction   Filter by jurisdiction/country code (e.g., US, EP, WO)')
         print('                   All search flags can be combined (all must match).')
         print('                Examples:')
         print('                  --search "machine learning"')
@@ -1029,8 +1364,10 @@ def main():
         print('                  --search-entity "Microsoft"')
         print('                  --search-entity \'"Samsung" OR "Apple"\'')
         print('                  --search-cpc "G06F*"')
+        print('                  --search-cpc "class_cpc.symbol:G06N*"')
         print('                  --search-cpc "G06N*,G06F21*"')
         print('                  --search "neural" --search-entity "Google" --search-cpc "G06N*"')
+        print('                  --search "AI" --start-date 04/01/2021 --end-date 04/01/2025 --jurisdiction US --document-type Granted_patent --search-cpc "G06N*"')
         print('\n  Directory mode (sequential):')
         print('                  python main.py data/ --search "battery"')
         print('                  python main.py data/ --search-cpc "H01M*"')
@@ -1043,6 +1380,10 @@ def main():
     search_query = None
     entity_query = None
     cpc_query = None
+    start_date = None
+    end_date = None
+    document_type = None
+    jurisdiction = None
 
     # Collect flags
     i = 2
@@ -1065,15 +1406,31 @@ def main():
             cpc_query = sys.argv[i + 1]
             i += 2
             continue
+        if arg == "--start-date" and i + 1 < len(sys.argv):
+            start_date = sys.argv[i + 1]
+            i += 2
+            continue
+        if arg == "--end-date" and i + 1 < len(sys.argv):
+            end_date = sys.argv[i + 1]
+            i += 2
+            continue
+        if arg == "--document-type" and i + 1 < len(sys.argv):
+            document_type = sys.argv[i + 1]
+            i += 2
+            continue
+        if arg == "--jurisdiction" and i + 1 < len(sys.argv):
+            jurisdiction = sys.argv[i + 1]
+            i += 2
+            continue
         if not arg.startswith('--'):
             output_file = arg
         i += 1
 
     # ---- Search-only mode on an existing JSON file ----
     if input_file.lower().endswith('.json'):
-        if not search_query and not entity_query and not cpc_query:
+        if not search_query and not entity_query and not cpc_query and not start_date and not end_date and not document_type and not jurisdiction:
             print(
-                "Error: When the input is a JSON file, --search, --search-entity, or --search-cpc is required.")
+                "Error: When the input is a JSON file, at least one search filter is required.")
             sys.exit(1)
         print(f"Loading patents from: {input_file}")
         try:
@@ -1083,7 +1440,13 @@ def main():
             sys.exit(1)
         print(f"Loaded {len(patents)} patents")
         run_search(patents, search_query, source_file=input_file,
-                   entity_query=entity_query, cpc_query=cpc_query)
+                   entity_query=entity_query, cpc_query=cpc_query,
+                   start_date=start_date, end_date=end_date,
+                   document_type=document_type, jurisdiction=jurisdiction)
+        # Explicitly release memory after search
+        del patents
+        del _meta
+        gc.collect()
         return
 
     # ---- Directory mode: sequential processing of all ZIPs ----
@@ -1101,10 +1464,11 @@ def main():
             sys.exit(0)
 
         # If any search flag was supplied, apply it now
-        if search_query or entity_query or cpc_query:
+        if search_query or entity_query or cpc_query or start_date or end_date or document_type or jurisdiction:
             run_search(all_patents, search_query,
                        source_file=source_label, entity_query=entity_query,
-                       cpc_query=cpc_query)
+                       cpc_query=cpc_query, start_date=start_date, end_date=end_date,
+                       document_type=document_type, jurisdiction=jurisdiction)
             return
 
         # No search flags — save full extraction
@@ -1171,10 +1535,11 @@ def main():
         sys.exit(0)
 
     # If any search flag was supplied alongside extraction, apply it now
-    if search_query or entity_query or cpc_query:
+    if search_query or entity_query or cpc_query or start_date or end_date or document_type or jurisdiction:
         run_search(all_patents, search_query,
                    source_file=input_file, entity_query=entity_query,
-                   cpc_query=cpc_query)
+                   cpc_query=cpc_query, start_date=start_date, end_date=end_date,
+                   document_type=document_type, jurisdiction=jurisdiction)
         return
 
     # Collect distinct entities across all patents
