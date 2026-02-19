@@ -17,6 +17,140 @@ import gzip
 import gc
 from datetime import datetime
 
+# Django setup for database operations
+import django
+import os
+import sys
+
+# Add the parent directory to the path to import Django settings
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')
+django.setup()
+
+from django.utils.dateparse import parse_date
+from django.db import transaction
+from accounts.models import Patent, Search
+
+
+def parse_patent_date(date_str):
+    """Parse date string to Django date object."""
+    if not date_str:
+        return None
+    try:
+        # Try ISO format first (YYYYMMDD)
+        return parse_date(date_str)
+    except (ValueError, TypeError):
+        return None
+
+
+def save_patent_to_db(patent_data):
+    """
+    Save a single patent dictionary to the database.
+    Returns the Patent object if successful, None if failed.
+    """
+    try:
+        with transaction.atomic():
+            # Get publication data
+            pub = patent_data.get('publication', {})
+            app = patent_data.get('application', {})
+            attrs = patent_data.get('attributes', {})
+            cpc = patent_data.get('classifications_cpc', {})
+            
+            # Check if patent already exists (by publication number)
+            pub_number = pub.get('doc_number')
+            existing = None
+            if pub_number:
+                try:
+                    existing = Patent.objects.filter(publication_number=pub_number).first()
+                except Exception:
+                    pass
+            
+            if existing:
+                # Update existing patent
+                patent = existing
+            else:
+                # Create new patent
+                patent = Patent()
+            
+            # Map fields
+            patent.publication_country = pub.get('country')
+            patent.publication_number = pub_number
+            patent.publication_kind = pub.get('kind')
+            patent.publication_date = parse_patent_date(pub.get('date'))
+            
+            patent.application_type = app.get('appl_type')
+            patent.application_number = app.get('document_id', {}).get('doc_number')
+            patent.application_date = parse_patent_date(app.get('document_id', {}).get('date'))
+            patent.application_series_code = patent_data.get('application_series_code')
+            
+            patent.title = patent_data.get('title')
+            patent.abstract = patent_data.get('abstract')
+            
+            # Classifications
+            patent.classifications_ipcr = patent_data.get('classifications_ipcr')
+            patent.classifications_cpc_main = cpc.get('main')
+            patent.classifications_cpc_further = cpc.get('further')
+            
+            # Inventors and applicants
+            patent.inventors = patent_data.get('inventors')
+            patent.applicants = patent_data.get('applicants')
+            
+            # Claims
+            patent.claims = patent_data.get('claims')
+            
+            # Priority claims
+            patent.priority_claims = patent_data.get('priority_claims')
+            
+            # Metadata
+            patent.source_file = attrs.get('file')
+            patent.language = attrs.get('lang')
+            patent.production_date = parse_patent_date(attrs.get('date_produced'))
+            
+            patent.save()
+            return patent
+            
+    except Exception as e:
+        print(f"    Warning: Failed to save patent {pub.get('doc_number', 'unknown')}: {e}")
+        return None
+
+
+def save_patents_batch_to_db(patents_data, batch_size=100):
+    """
+    Save a batch of patents to the database.
+    Returns the number of patents saved successfully.
+    """
+    saved_count = 0
+    for i, patent_data in enumerate(patents_data):
+        if save_patent_to_db(patent_data):
+            saved_count += 1
+        
+        # Print progress every batch_size patents
+        if (i + 1) % batch_size == 0:
+            print(f"    Saved {i + 1}/{len(patents_data)} patents to database...")
+    
+    return saved_count
+
+
+def save_search_to_db(search_hash, query, patent_ids):
+    """
+    Save a search record to the database with associated patents.
+    """
+    try:
+        with transaction.atomic():
+            search, created = Search.objects.get_or_create(
+                search_hash=search_hash,
+                defaults={'search_query': query}
+            )
+            
+            if patent_ids:
+                patents = Patent.objects.filter(patent_id__in=patent_ids)
+                search.patents.set(patents)
+            
+            return search
+    except Exception as e:
+        print(f"    Warning: Failed to save search {search_hash}: {e}")
+        return None
+
 
 # Checkpoint partition size
 CHECKPOINT_PARTITION_SIZE = 1000
@@ -1082,7 +1216,7 @@ def load_patents_from_json(json_path):
         f"{json_path} does not contain a recognised patent JSON structure")
 
 
-def read_all_zips_sequential(data_dir, keywords=None, checkpoint_file=None):
+def read_all_zips_sequential(data_dir, keywords=None, checkpoint_file=None, save_to_db=False):
     """
     Discover all .zip files in *data_dir* and extract patents from each
     sequentially (one at a time) to keep memory usage low.
@@ -1094,6 +1228,7 @@ def read_all_zips_sequential(data_dir, keywords=None, checkpoint_file=None):
         data_dir: Directory containing ZIP files
         keywords: Optional keywords to filter patents during extraction
         checkpoint_file: Optional custom checkpoint file path
+        save_to_db: If True, save extracted patents to the database
 
     Returns a tuple of (all_patents, source_files) where *all_patents* is
     the combined list of patent dicts and *source_files* is the list of
@@ -1145,6 +1280,12 @@ def read_all_zips_sequential(data_dir, keywords=None, checkpoint_file=None):
             patents = read_xml_content(zip_path, keywords)
             print(f"  ✓ {zip_name}: {len(patents)} patents")
             all_patents.extend(patents)
+            
+            # Save to database if flag is set
+            if save_to_db:
+                print(f"  Saving patents to database...")
+                saved_count = save_patents_batch_to_db(patents)
+                print(f"  ✓ Saved {saved_count} patents to database")
             
             # Mark as processed
             processed_files.add(zip_name)
@@ -1266,6 +1407,30 @@ def run_search(patents, search_query, source_file, entity_query=None, cpc_query=
     qhash = search_hash(combined_query)
     output_file = f"search_{qhash}.json"
 
+    # Save search to database if patents exist in database
+    try:
+        from accounts.models import Patent, Search
+        db_patent_count = Patent.objects.count()
+        if db_patent_count > 0:
+            # Get patent IDs from matched patents (by publication number)
+            patent_ids = []
+            for p in matched:
+                pub = p.get('publication', {})
+                pub_num = pub.get('doc_number')
+                if pub_num:
+                    db_patent = Patent.objects.filter(publication_number=pub_num).first()
+                    if db_patent:
+                        patent_ids.append(db_patent.patent_id)
+            
+            if patent_ids:
+                # Create or get search record
+                query_description = combined_query
+                search_obj = save_search_to_db(qhash, query_description, patent_ids)
+                if search_obj:
+                    print(f"  ✓ Search saved to database with {len(patent_ids)} attributed patents")
+    except Exception as e:
+        print(f"  Note: Could not save search to database: {e}")
+
     # Collect distinct entities from matched patents
     entities = collect_distinct_entities(matched)
 
@@ -1371,6 +1536,8 @@ def main():
         print('\n  Directory mode (sequential):')
         print('                  python main.py data/ --search "battery"')
         print('                  python main.py data/ --search-cpc "H01M*"')
+        print('\n  Database options:')
+        print('                  --save-db         Save extracted patents to database')
         sys.exit(1)
 
     # Parse command line arguments
@@ -1384,6 +1551,7 @@ def main():
     end_date = None
     document_type = None
     jurisdiction = None
+    save_to_db = False
 
     # Collect flags
     i = 2
@@ -1422,6 +1590,10 @@ def main():
             jurisdiction = sys.argv[i + 1]
             i += 2
             continue
+        if arg == "--save-db":
+            save_to_db = True
+            i += 1
+            continue
         if not arg.startswith('--'):
             output_file = arg
         i += 1
@@ -1454,7 +1626,7 @@ def main():
         if keywords:
             print(f"Filtering patents containing keywords: {keywords}")
         all_patents, source_files = read_all_zips_sequential(
-            input_file, keywords)
+            input_file, keywords, save_to_db=save_to_db)
         source_label = ", ".join(os.path.basename(f) for f in source_files)
 
         if not all_patents:
@@ -1527,6 +1699,12 @@ def main():
     print(f"Processing file: {input_file}")
 
     all_patents = read_xml_content(input_file, keywords)
+
+    # Save to database if flag is set
+    if save_to_db and all_patents:
+        print(f"Saving patents to database...")
+        saved_count = save_patents_batch_to_db(all_patents)
+        print(f"  ✓ Saved {saved_count} patents to database")
 
     if not all_patents:
         print(f"\n⚠️ No patents extracted from {input_file}")

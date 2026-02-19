@@ -12,6 +12,8 @@ This tool extracts patent data from XML or ZIP files containing USPTO patent doc
   - CPC classification codes with wildcard support
 - Combine multiple search criteria with AND logic
 - Generate JSON output with distinct entity lists
+- **Save patents to SQLite database** for persistent storage
+- **Attribute searches to patents** in the database
 
 ## Usage
 
@@ -28,6 +30,65 @@ python main.py <json_file> --search-entity '<query>'
 python main.py <json_file> --search-cpc '<pattern>'
 ```
 
+## Database Storage (SQLite)
+
+The tool can save extracted patents to a SQLite database for persistent storage and search attribution.
+
+### Saving Patents to Database
+
+```bash
+# Extract from single ZIP file and save to database
+python main.py data/ipa260115_part1.zip --save-db
+
+# Extract from directory and save all patents to database
+python main.py data/ --save-db
+
+# Extract with keyword filtering and save to database
+python main.py data/ --keywords "artificial intelligence" --save-db
+```
+
+### Database Schema
+
+The database contains two main tables:
+
+**Patent Table:**
+| Field | Type | Description |
+|-------|------|-------------|
+| patent_id | Integer (PK) | Auto-generated primary key |
+| publication_number | String | US publication number (indexed) |
+| publication_date | Date | Publication date |
+| title | Text | Patent title |
+| abstract | Text | Patent abstract |
+| claims | JSON | Full claims data |
+| inventors | JSON | List of inventors |
+| applicants | JSON | List of applicants |
+| classifications_cpc_main | JSON | Main CPC classification |
+| classifications_cpc_further | JSON | Further CPC classifications |
+| classifications_ipcr | JSON | IPC classifications |
+| source_file | String | Source XML file |
+| extracted_at | DateTime | When patent was added |
+
+**Search Table:**
+| Field | Type | Description |
+|-------|------|-------------|
+| search_hash | String (PK) | SHA256 hash of query (indexed) |
+| search_query | Text | Original search query |
+| created_at | DateTime | When search was performed |
+| patents | ManyToMany | Related patents |
+
+### Querying the Database
+
+```bash
+# Check how many patents are in the database
+docker compose run --rm web python -c "import os; os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings'); import django; django.setup(); from accounts.models import Patent; print(Patent.objects.count())"
+
+# Find patents by publication number
+docker compose run --rm web python -c "import os; os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings'); import django; django.setup(); from accounts.models import Patent; p = Patent.objects.filter(publication_number='20260013410').first(); print(p.title if p else 'Not found')"
+
+# List all searches
+docker compose run --rm web python -c "import os; os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings'); import django; django.setup(); from accounts.models import Search; print([(s.search_hash, s.search_query, s.patents.count()) for s in Search.objects.all()])"
+```
+
 ## Command Line Options
 
 ### --keywords
@@ -36,6 +97,23 @@ Filter patents during extraction by keywords in title or abstract.
 Example:
 ```bash
 python main.py data/ipa260115.zip --keywords "artificial intelligence,neural network"
+```
+
+### --save-db
+Save extracted patents to the SQLite database. When used with extraction, patents are stored with full data including claims, inventors, applicants, and classifications.
+
+When used with search on patents already in the database, the search is attributed to matching patents.
+
+Example:
+```bash
+# Extract and save to database
+python main.py data/ipa260115.zip --save-db
+
+# Extract directory and save all patents
+python main.py data/ --save-db
+
+# Search and attribute to database
+python main.py patents.json --search "machine learning"
 ```
 
 ### --search

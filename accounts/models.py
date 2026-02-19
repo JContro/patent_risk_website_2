@@ -31,3 +31,77 @@ class UserProfile(models.Model):
     
     def __str__(self):
         return f"Profile of {self.user.email}"
+
+
+class Patent(models.Model):
+    """
+    Patent model storing full extraction data from USPTO XML files.
+    """
+    # Primary key
+    patent_id = models.AutoField(primary_key=True)
+    
+    # Publication info
+    publication_country = models.CharField(max_length=10, blank=True, null=True)
+    publication_number = models.CharField(max_length=50, blank=True, null=True, db_index=True)
+    publication_kind = models.CharField(max_length=10, blank=True, null=True)
+    publication_date = models.DateField(blank=True, null=True)
+    
+    # Application info
+    application_type = models.CharField(max_length=50, blank=True, null=True)
+    application_number = models.CharField(max_length=50, blank=True, null=True, db_index=True)
+    application_date = models.DateField(blank=True, null=True)
+    application_series_code = models.CharField(max_length=20, blank=True, null=True)
+    
+    # Core content
+    title = models.TextField(blank=True, null=True)
+    abstract = models.TextField(blank=True, null=True)
+    
+    # Classifications (stored as JSON for flexibility)
+    classifications_ipcr = models.JSONField(blank=True, null=True)
+    classifications_cpc_main = models.JSONField(blank=True, null=True)
+    classifications_cpc_further = models.JSONField(blank=True, null=True)
+    
+    # Inventors (stored as JSON - list of inventors)
+    inventors = models.JSONField(blank=True, null=True)
+    
+    # Applicants (stored as JSON - list of applicants)
+    applicants = models.JSONField(blank=True, null=True)
+    
+    # Claims (stored as JSON - list of claims)
+    claims = models.JSONField(blank=True, null=True)
+    
+    # Priority claims
+    priority_claims = models.JSONField(blank=True, null=True)
+    
+    # Metadata
+    source_file = models.CharField(max_length=255, blank=True, null=True)
+    language = models.CharField(max_length=10, blank=True, null=True)
+    production_date = models.DateField(blank=True, null=True)
+    
+    # Timestamps
+    extracted_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        ordering = ['-publication_date', '-patent_id']
+    
+    def __str__(self):
+        return f"Patent {self.publication_number}"
+
+
+class Search(models.Model):
+    """
+    Search model to attribute searches to patents.
+    """
+    search_hash = models.CharField(max_length=64, unique=True, db_index=True)  # SHA256 hash
+    search_query = models.TextField(blank=True, null=True)  # Store original query for reference
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    # Many-to-many relationship with patents
+    patents = models.ManyToManyField(Patent, related_name='searches')
+    
+    class Meta:
+        ordering = ['-created_at']
+    
+    def __str__(self):
+        return f"Search {self.search_hash[:16]}..."
