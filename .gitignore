@@ -2,4 +2,5 @@
 *.sqlite3
 *.db
 db.sqlite3
-data_management
+data_management/data
+
