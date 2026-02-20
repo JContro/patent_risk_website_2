@@ -16,6 +16,8 @@ import glob
 import gzip
 import gc
 from datetime import datetime
+from tqdm import tqdm
+
 
 # Django setup for database operations
 import django
@@ -29,7 +31,7 @@ django.setup()
 
 from django.utils.dateparse import parse_date
 from django.db import transaction
-from accounts.models import Patent, Search
+from accounts.models import Patent, Search, Entity
 
 
 def parse_patent_date(date_str):
@@ -114,19 +116,30 @@ def save_patent_to_db(patent_data):
         return None
 
 
-def save_patents_batch_to_db(patents_data, batch_size=100):
+def save_patent_with_search(patent_data, search_obj):
+    """
+    Save a single patent and link it to a Search record.
+    Returns the Patent object if successful, None if failed.
+    This function uses O(1) memory - it saves one patent at a time.
+    """
+    patent = save_patent_to_db(patent_data)
+    if patent and search_obj:
+        try:
+            search_obj.patents.add(patent)
+        except Exception as e:
+            print(f"    Warning: Failed to link patent to search: {e}")
+    return patent
+
+
+def save_patents_batch_to_db(patents_data):
     """
     Save a batch of patents to the database.
     Returns the number of patents saved successfully.
     """
     saved_count = 0
-    for i, patent_data in enumerate(patents_data):
+    for patent_data in tqdm(patents_data, desc="Saving to DB", leave=False):
         if save_patent_to_db(patent_data):
             saved_count += 1
-        
-        # Print progress every batch_size patents
-        if (i + 1) % batch_size == 0:
-            print(f"    Saved {i + 1}/{len(patents_data)} patents to database...")
     
     return saved_count
 
@@ -152,85 +165,49 @@ def save_search_to_db(search_hash, query, patent_ids):
         return None
 
 
-# Checkpoint partition size
-CHECKPOINT_PARTITION_SIZE = 1000
-
-
-def get_checkpoint_base_name(checkpoint_file):
-    """Get the base name for checkpoint partition files."""
-    return checkpoint_file.replace('.json', '')
-
-
-def save_partitioned_checkpoint(checkpoint_file, processed_files, all_patents, error=None):
+def save_entities_to_db(entities_data, search_obj=None, patents=None):
     """
-    Save checkpoint with partitioned and compressed patent data.
-    Each partition contains up to CHECKPOINT_PARTITION_SIZE patents and is gzip compressed.
+    Save entity records to the database.
+    
+    Args:
+        entities_data: Dict with 'inventors', 'applicants', 'assignees' lists
+        search_obj: Optional Search object to link entities to
+        patents: Optional list of Patent objects to link entities to
+    
+    Returns the number of entities saved.
     """
-    base_name = get_checkpoint_base_name(checkpoint_file)
-    checkpoint_dir = os.path.dirname(checkpoint_file) or '.'
-    
-    # Remove old partition files
-    partition_num = 0
-    while True:
-        old_partition = os.path.join(checkpoint_dir, f"{os.path.basename(base_name)}_part{partition_num}.json.gz")
-        if os.path.exists(old_partition):
-            os.remove(old_partition)
-            partition_num += 1
-        else:
-            break
-    
-    # Save new partition files
-    for i in range(0, len(all_patents), CHECKPOINT_PARTITION_SIZE):
-        partition = all_patents[i:i + CHECKPOINT_PARTITION_SIZE]
-        partition_num = i // CHECKPOINT_PARTITION_SIZE
-        partition_file = os.path.join(checkpoint_dir, f"{os.path.basename(base_name)}_part{partition_num}.json.gz")
-        
-        with gzip.open(partition_file, 'wt', encoding='utf-8') as f:
-            json.dump(partition, f, ensure_ascii=False)
-    
-    # Save main checkpoint file (metadata only, no patents)
-    checkpoint_data = {
-        'processed_files': list(processed_files),
-        'total_patents': len(all_patents),
-        'partition_count': (len(all_patents) + CHECKPOINT_PARTITION_SIZE - 1) // CHECKPOINT_PARTITION_SIZE,
-        'partition_size': CHECKPOINT_PARTITION_SIZE,
-        'last_updated': datetime.now().isoformat()
-    }
-    if error:
-        checkpoint_data['last_error'] = str(error)
-    
-    with open(checkpoint_file, 'w', encoding='utf-8') as f:
-        json.dump(checkpoint_data, f, ensure_ascii=False)
-    
-    return len(all_patents)
-
-
-def load_partitioned_checkpoint(checkpoint_file):
-    """
-    Load checkpoint data and patents from partitioned checkpoint files.
-    Returns (processed_files, all_patents).
-    """
-    base_name = get_checkpoint_base_name(checkpoint_file)
-    checkpoint_dir = os.path.dirname(checkpoint_file) or '.'
-    
-    # Load main checkpoint file
-    with open(checkpoint_file, 'r', encoding='utf-8') as f:
-        checkpoint_data = json.load(f)
-    
-    processed_files = set(checkpoint_data.get('processed_files', []))
-    partition_count = checkpoint_data.get('partition_count', 0)
-    
-    # Load all partition files
-    all_patents = []
-    for i in range(partition_count):
-        partition_file = os.path.join(checkpoint_dir, f"{os.path.basename(base_name)}_part{i}.json.gz")
-        
-        if os.path.exists(partition_file):
-            with gzip.open(partition_file, 'rt', encoding='utf-8') as f:
-                partition = json.load(f)
-                all_patents.extend(partition)
-    
-    return processed_files, all_patents
+    saved_count = 0
+    try:
+        with transaction.atomic():
+            entity_type_map = {
+                'inventors': 'inventor',
+                'applicants': 'applicant',
+                'assignees': 'assignee',
+            }
+            
+            for field, entity_type in entity_type_map.items():
+                entity_names = entities_data.get(field, [])
+                for name in entity_names:
+                    entity, created = Entity.objects.get_or_create(
+                        name=name,
+                        entity_type=entity_type
+                    )
+                    if created:
+                        saved_count += 1
+                    
+                    # Link to search if provided
+                    if search_obj:
+                        entity.searches.add(search_obj)
+                    
+                    # Link to patents if provided
+                    if patents:
+                        for patent in patents:
+                            entity.patents.add(patent)
+            
+            return saved_count
+    except Exception as e:
+        print(f"    Warning: Failed to save entities: {e}")
+        return 0
 
 
 def extract_text(element):
@@ -1113,7 +1090,6 @@ def read_xml_content(file_path, keywords=None):
     """
     # Check if file is a ZIP archive
     if file_path.lower().endswith('.zip'):
-        print(f"Opening ZIP archive: {file_path}")
         try:
             with zipfile.ZipFile(file_path, 'r') as zip_ref:
                 # Find XML files in the archive
@@ -1124,11 +1100,9 @@ def read_xml_content(file_path, keywords=None):
                         f"Error: No XML files found in ZIP archive {file_path}")
                     return []
 
-                print(f"Found {len(xml_files)} XML file(s) in ZIP archive")
                 all_patents = []
 
-                for xml_file in xml_files:
-                    print(f"  Extracting from: {xml_file}")
+                for xml_file in tqdm(xml_files, desc=os.path.basename(file_path), leave=False):
                     try:
                         with zip_ref.open(xml_file, 'r') as xml_content:
                             content = xml_content.read().decode('utf-8', errors='replace')
@@ -1145,8 +1119,7 @@ def read_xml_content(file_path, keywords=None):
             print(f"Error: {file_path} is not a valid ZIP file")
             return []
 
-    # Regular XML file
-    print(f"Opening XML file: {file_path}")
+    # Regular XML file - use tqdm for progress
     try:
         with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
             content = f.read()
@@ -1165,14 +1138,13 @@ def parse_xml_content(content, source_name, keywords=None):
     fragments = [f for f in fragments if f.strip()]
 
     if len(fragments) > 1:
-        print(f"Found {len(fragments)} XML documents in {source_name}")
         fragments = ['<?xml' + f for f in fragments]
     else:
         fragments = [content]
 
     all_patents = []
 
-    for i, fragment in enumerate(fragments, 1):
+    for fragment in tqdm(fragments, desc=source_name[:30], leave=False):
         try:
             # Add XML declaration if missing
             if not fragment.strip().startswith('<?xml'):
@@ -1182,7 +1154,6 @@ def parse_xml_content(content, source_name, keywords=None):
 
             # Check if root is a patent application or grant
             if root.tag in ['us-patent-application', 'us-patent-grant']:
-                print(f"Extracting patent {i}/{len(fragments)}...")
                 patent_data = extract_patent(root)
 
                 # Filter by keywords if provided
@@ -1190,15 +1161,10 @@ def parse_xml_content(content, source_name, keywords=None):
                     continue
 
                 all_patents.append(patent_data)
-            else:
-                print(
-                    f"Fragment {i}: Not a patent document (root: {root.tag})")
 
         except ET.ParseError as e:
-            print(f"Warning: Could not parse fragment {i}: {e}")
             continue
         except Exception as e:
-            print(f"Warning: Error extracting fragment {i}: {e}")
             continue
 
     return all_patents
@@ -1216,18 +1182,14 @@ def load_patents_from_json(json_path):
         f"{json_path} does not contain a recognised patent JSON structure")
 
 
-def read_all_zips_sequential(data_dir, keywords=None, checkpoint_file=None, save_to_db=False):
+def read_all_zips_sequential(data_dir, keywords=None, save_to_db=False):
     """
     Discover all .zip files in *data_dir* and extract patents from each
     sequentially (one at a time) to keep memory usage low.
 
-    Uses checkpointing to save progress after each ZIP file is processed.
-    If interrupted, can resume from the last checkpoint.
-
     Args:
         data_dir: Directory containing ZIP files
         keywords: Optional keywords to filter patents during extraction
-        checkpoint_file: Optional custom checkpoint file path
         save_to_db: If True, save extracted patents to the database
 
     Returns a tuple of (all_patents, source_files) where *all_patents* is
@@ -1239,79 +1201,52 @@ def read_all_zips_sequential(data_dir, keywords=None, checkpoint_file=None, save
         print(f"⚠️  No ZIP files found in {data_dir}")
         return [], []
 
-    # Default checkpoint file based on data directory
-    if checkpoint_file is None:
-        checkpoint_file = os.path.join(data_dir, ".extraction_checkpoint.json")
+    print(f"\nFound {len(zip_files)} ZIP file(s) in {data_dir}")
 
-    # Check for existing checkpoint
-    processed_files = set()
     all_patents = []
+    processed_count = 0
     
-    if os.path.exists(checkpoint_file):
-        print(f"\n📂 Found checkpoint file: {checkpoint_file}")
-        try:
-            processed_files, all_patents = load_partitioned_checkpoint(checkpoint_file)
-            print(f"  Resuming from checkpoint: {len(processed_files)} files already processed")
-            print(f"  Already extracted: {len(all_patents)} patents")
-        except (json.JSONDecodeError, IOError) as e:
-            print(f"  Warning: Could not load checkpoint file: {e}")
-            processed_files = set()
-
-    print(f"\nFound {len(zip_files)} ZIP file(s) in {data_dir}:")
-    for zf in zip_files:
-        print(f"  • {os.path.basename(zf)}")
-
-    # Filter out already processed files
-    remaining_files = [zf for zf in zip_files if os.path.basename(zf) not in processed_files]
-    print(f"\nProcessing {len(zip_files)} ZIP files sequentially …")
-    if processed_files:
-        print(f"  (Skipping {len(processed_files)} already processed files)")
-
-    for idx, zip_path in enumerate(zip_files, 1):
-        zip_name = os.path.basename(zip_path)
-        
-        # Skip already processed files
-        if zip_name in processed_files:
-            print(f"\n[{idx}/{len(zip_files)}] Skipping {zip_name} (already processed)")
-            continue
+    # Use tqdm for progress tracking
+    with tqdm(zip_files, desc="Processing ZIPs") as pbar:
+        for zip_path in pbar:
+            zip_name = os.path.basename(zip_path)
+            pbar.set_postfix_str(zip_name)
             
-        print(f"\n[{idx}/{len(zip_files)}] Processing {zip_name} …")
-        try:
-            patents = read_xml_content(zip_path, keywords)
-            print(f"  ✓ {zip_name}: {len(patents)} patents")
-            all_patents.extend(patents)
-            
-            # Save to database if flag is set
+            # Create Search record for this ZIP file (for O(1) memory per patent)
+            search_obj = None
             if save_to_db:
-                print(f"  Saving patents to database...")
-                saved_count = save_patents_batch_to_db(patents)
-                print(f"  ✓ Saved {saved_count} patents to database")
+                try:
+                    from accounts.models import Search
+                    zip_hash = search_hash(zip_name)
+                    search_obj, _ = Search.objects.get_or_create(
+                        search_hash=zip_hash,
+                        defaults={'search_query': f'Extracted from {zip_name}'}
+                    )
+                except Exception as e:
+                    print(f"    Warning: Failed to create search record: {e}")
             
-            # Mark as processed
-            processed_files.add(zip_name)
-            
-            # Save checkpoint after each successful file (partitioned and compressed)
-            save_partitioned_checkpoint(checkpoint_file, processed_files, all_patents)
-            print(f"  ✓ Checkpoint saved ({len(all_patents)} total patents)")
-            
-            # Force garbage collection to free memory
-            gc.collect()
-            
-        except Exception as e:
-            print(f"  ✗ {zip_name}: Error – {e}")
-            # Save checkpoint even on error to preserve progress
-            save_partitioned_checkpoint(checkpoint_file, processed_files, all_patents, error=e)
-            print(f"  ✓ Checkpoint saved despite error ({len(all_patents)} total patents)")
-            # Continue to next file instead of stopping
-            continue
+            try:
+                patents = read_xml_content(zip_path, keywords)
+                
+                # Always collect patents for searching, and optionally save to DB
+                all_patents.extend(patents)
+                
+                # Save patents to database if flag is set
+                if save_to_db and search_obj:
+                    for patent_data in patents:
+                        save_patent_with_search(patent_data, search_obj)
+                        # Let GC clean up patent_data after each iteration
+                
+                processed_count += 1
+                
+                # Force garbage collection to free memory
+                gc.collect()
+                
+            except Exception as e:
+                print(f"\n  ✗ {zip_name}: Error – {e}")
+                continue
 
     print(f"\nTotal patents extracted from all ZIPs: {len(all_patents)}")
-    
-    # Clean up checkpoint file if all files processed
-    if len(processed_files) == len(zip_files):
-        if os.path.exists(checkpoint_file):
-            os.remove(checkpoint_file)
-            print(f"\n✓ All files processed, checkpoint file removed")
     
     return all_patents, zip_files
 
@@ -1434,61 +1369,17 @@ def run_search(patents, search_query, source_file, entity_query=None, cpc_query=
     # Collect distinct entities from matched patents
     entities = collect_distinct_entities(matched)
 
-    # Create a separate JSON file for entities with timestamp
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    entities_file = f"entities_{timestamp}.json"
+    # Save entities to database
+    entity_count = 0
+    if search_obj:
+        entity_count = save_entities_to_db(entities, search_obj=search_obj)
 
-    with open(entities_file, 'w', encoding='utf-8') as f:
-        json.dump(entities, f, indent=2, ensure_ascii=False)
-
-    output_data = {
-        "search_date": datetime.now().isoformat(),
-        "search_query": search_query,
-        "entity_query": entity_query,
-        "cpc_query": cpc_query,
-        "start_date": start_date,
-        "end_date": end_date,
-        "document_type": document_type,
-        "jurisdiction": jurisdiction,
-        "search_hash": qhash,
-        "source_file": source_file,
-        "total_searched": total_before,
-        "total_matched": len(matched),
-        "entities_file": entities_file,
-        "patents": matched
-    }
-
-    with open(output_file, 'w', encoding='utf-8') as f:
-        json.dump(output_data, f, indent=2, ensure_ascii=False)
-
-    # Summary
+    # Summary (minimal output)
     print(f"\n✓ Search matched {len(matched)} / {total_before} patents")
-    print(f"✓ Results saved to: {output_file}")
-
-    print("\n" + "=" * 70)
-    print("SEARCH RESULTS SUMMARY")
-    print("=" * 70)
-    if search_query:
-        print(f"Content query : {search_query}")
-    if entity_query:
-        print(f"Entity query  : {entity_query}")
-    if cpc_query:
-        print(f"CPC query     : {cpc_query}")
-    print(f"Hash  : {qhash}")
-    print(f"Source: {source_file}")
-    print(f"Matched: {len(matched)} / {total_before}")
-
-    print(f"Distinct entities: {len(entities['all'])} total "
-          f"({len(entities['inventors'])} inventors, "
-          f"{len(entities['applicants'])} applicants, "
-          f"{len(entities['assignees'])} assignees)")
-
-    print("\nFirst 5 matching patent titles:")
-    for i, patent in enumerate(matched[:5], 1):
-        title = patent.get("title", "No title")
-        print(f"  {i}. {title[:80]}{'...' if len(title) > 80 else ''}")
-    if len(matched) > 5:
-        print(f"\n  ... and {len(matched) - 5} more patents")
+    if search_obj:
+        print(f"✓ Search saved to database")
+    if entity_count > 0:
+        print(f"✓ Saved {entity_count} entities to database")
 
 
 def main():
@@ -1643,53 +1534,14 @@ def main():
                        document_type=document_type, jurisdiction=jurisdiction)
             return
 
-        # No search flags — save full extraction
-        entities = collect_distinct_entities(all_patents)
-
-        # Create a separate JSON file for entities with timestamp
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        entities_file = f"entities_{timestamp}.json"
-
-        with open(entities_file, 'w', encoding='utf-8') as f:
-            json.dump(entities, f, indent=2, ensure_ascii=False)
-
-        print(f"\nSaving {len(all_patents)} patents to {output_file}...")
-
-        output_data = {
-            "extraction_date": datetime.now().isoformat(),
-            "source_files": [os.path.basename(f) for f in source_files],
-            "keywords_filter": keywords if keywords else None,
-            "total_patents": len(all_patents),
-            "entities_file": entities_file,
-            "patents": all_patents
-        }
-
-        with open(output_file, 'w', encoding='utf-8') as f:
-            json.dump(output_data, f, indent=2, ensure_ascii=False)
-
-        print(f"\n✓ Successfully extracted {len(all_patents)} patents!")
-        print(f"✓ Saved to: {output_file}")
-
-        print("\n" + "=" * 70)
-        print("EXTRACTION SUMMARY")
-        print("=" * 70)
-        print(f"Source: {source_label}")
-        if keywords:
-            print(f"Keywords filter: {keywords}")
-        print(f"Total patents extracted: {len(all_patents)}")
-        print(f"Distinct entities: {len(entities['all'])} total "
-              f"({len(entities['inventors'])} inventors, "
-              f"{len(entities['applicants'])} applicants, "
-              f"{len(entities['assignees'])} assignees)")
-
-        if all_patents:
-            print("\nFirst 5 patent titles:")
-            for idx, patent in enumerate(all_patents[:5], 1):
-                title = patent.get("title", "No title")
-                print(
-                    f"  {idx}. {title[:80]}{'...' if len(title) > 80 else ''}")
-            if len(all_patents) > 5:
-                print(f"\n  ... and {len(all_patents) - 5} more patents")
+        # No search flags — save to database
+        if save_to_db:
+            entity_count = save_entities_to_db(entities)
+            print(f"\n✓ Extracted {len(all_patents)} patents")
+            print(f"✓ Saved {entity_count} entities to database")
+        else:
+            print(f"\n✓ Extracted {len(all_patents)} patents")
+            print(f"✓ Distinct entities: {len(entities['all'])} total")
 
         return
 
@@ -1702,8 +1554,24 @@ def main():
 
     # Save to database if flag is set
     if save_to_db and all_patents:
+        # Create Search record for this single file
+        try:
+            from accounts.models import Search
+            file_hash = search_hash(input_file)
+            search_obj, _ = Search.objects.get_or_create(
+                search_hash=file_hash,
+                defaults={'search_query': f'Extracted from {os.path.basename(input_file)}'}
+            )
+        except Exception as e:
+            print(f"    Warning: Failed to create search record: {e}")
+            search_obj = None
+        
+        # Save patents one by one with O(1) memory per patent
         print(f"Saving patents to database...")
-        saved_count = save_patents_batch_to_db(all_patents)
+        saved_count = 0
+        for patent_data in all_patents:
+            if save_patent_with_search(patent_data, search_obj):
+                saved_count += 1
         print(f"  ✓ Saved {saved_count} patents to database")
 
     if not all_patents:
@@ -1723,83 +1591,14 @@ def main():
     # Collect distinct entities across all patents
     entities = collect_distinct_entities(all_patents)
 
-    # Create a separate JSON file for entities with timestamp
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    entities_file = f"entities_{timestamp}.json"
-
-    with open(entities_file, 'w', encoding='utf-8') as f:
-        json.dump(entities, f, indent=2, ensure_ascii=False)
-
-    # Save full extraction to JSON
-    print(f"\nSaving {len(all_patents)} patents to {output_file}...")
-
-    output_data = {
-        "extraction_date": datetime.now().isoformat(),
-        "source_file": input_file,
-        "keywords_filter": keywords if keywords else None,
-        "total_patents": len(all_patents),
-        "entities_file": entities_file,
-        "patents": all_patents
-    }
-
-    with open(output_file, 'w', encoding='utf-8') as f:
-        json.dump(output_data, f, indent=2, ensure_ascii=False)
-
-    print(f"\n✓ Successfully extracted {len(all_patents)} patents!")
-    print(f"✓ Saved to: {output_file}")
-
-    # Print summary
-    print("\n" + "=" * 70)
-    print("EXTRACTION SUMMARY")
-    print("=" * 70)
-    print(f"Source: {input_file}")
-    if keywords:
-        print(f"Keywords filter: {keywords}")
-    print(f"Total patents extracted: {len(all_patents)}")
-    print(f"Distinct entities: {len(entities['all'])} total "
-          f"({len(entities['inventors'])} inventors, "
-          f"{len(entities['applicants'])} applicants, "
-          f"{len(entities['assignees'])} assignees)")
-
-    if all_patents:
-        # Show matched keywords in titles
-        print("\nFirst 5 patent titles:")
-        for i, patent in enumerate(all_patents[:5], 1):
-            title = patent.get("title", "No title")
-            # Highlight keywords in title
-            if keywords:
-                for keyword in keywords:
-                    if keyword.lower() in title.lower():
-                        title = title.replace(keyword, f"**{keyword}**")
-                        title = title.replace(
-                            keyword.lower(), f"**{keyword.lower()}**")
-                        title = title.replace(
-                            keyword.upper(), f"**{keyword.upper()}**")
-
-            print(f"  {i}. {title[:80]}{'...' if len(title) > 80 else ''}")
-
-        if len(all_patents) > 5:
-            print(f"\n  ... and {len(all_patents) - 5} more patents")
-
-        # Show keyword statistics
-        if keywords:
-            print("\nKeyword matches (case-insensitive):")
-            keyword_counts = {keyword: 0 for keyword in keywords}
-            for patent in all_patents:
-                text_fields = []
-                if "title" in patent and patent["title"]:
-                    text_fields.append(patent["title"].lower())
-                if "abstract" in patent and patent["abstract"]:
-                    text_fields.append(patent["abstract"].lower())
-
-                combined_text = " ".join(text_fields)
-                for keyword in keywords:
-                    if keyword.lower() in combined_text:
-                        keyword_counts[keyword] += 1
-
-            for keyword, count in keyword_counts.items():
-                if count > 0:
-                    print(f"  '{keyword}': {count} patents")
+    # Save entities to database
+    if save_to_db:
+        entity_count = save_entities_to_db(entities)
+        print(f"\n✓ Extracted {len(all_patents)} patents")
+        print(f"✓ Saved {entity_count} entities to database")
+    else:
+        print(f"\n✓ Extracted {len(all_patents)} patents")
+        print(f"✓ Distinct entities: {len(entities['all'])} total")
 
 
 if __name__ == "__main__":

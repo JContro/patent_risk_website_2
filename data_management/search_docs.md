@@ -11,9 +11,10 @@ This tool extracts patent data from XML or ZIP files containing USPTO patent doc
   - Entity names (inventors, applicants, assignees/owners)
   - CPC classification codes with wildcard support
 - Combine multiple search criteria with AND logic
-- Generate JSON output with distinct entity lists
 - **Save patents to SQLite database** for persistent storage
+- **Save entities (inventors, applicants, assignees) to database**
 - **Attribute searches to patents** in the database
+- Progress tracking with tqdm (minimal console output)
 
 ## Usage
 
@@ -49,7 +50,7 @@ python main.py data/ --keywords "artificial intelligence" --save-db
 
 ### Database Schema
 
-The database contains two main tables:
+The database contains three main tables:
 
 **Patent Table:**
 | Field | Type | Description |
@@ -67,6 +68,7 @@ The database contains two main tables:
 | classifications_ipcr | JSON | IPC classifications |
 | source_file | String | Source XML file |
 | extracted_at | DateTime | When patent was added |
+| entities | ManyToMany | Related entities |
 
 **Search Table:**
 | Field | Type | Description |
@@ -75,18 +77,36 @@ The database contains two main tables:
 | search_query | Text | Original search query |
 | created_at | DateTime | When search was performed |
 | patents | ManyToMany | Related patents |
+| entities | ManyToMany | Related entities |
+
+**Entity Table:**
+| Field | Type | Description |
+|-------|------|-------------|
+| entity_id | Integer (PK) | Auto-generated primary key |
+| name | String | Entity name (indexed) |
+| entity_type | String | Type: inventor, applicant, or assignee (indexed) |
+| created_at | DateTime | When entity was added |
+| updated_at | DateTime | Last update timestamp |
+| patents | ManyToMany | Related patents |
+| searches | ManyToMany | Related searches |
 
 ### Querying the Database
 
 ```bash
 # Check how many patents are in the database
-docker compose run --rm web python -c "import os; os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings'); import django; django.setup(); from accounts.models import Patent; print(Patent.objects.count())"
+docker compose exec web python -c "import os; os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings'); import django; django.setup(); from accounts.models import Patent; print(Patent.objects.count())"
 
 # Find patents by publication number
-docker compose run --rm web python -c "import os; os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings'); import django; django.setup(); from accounts.models import Patent; p = Patent.objects.filter(publication_number='20260013410').first(); print(p.title if p else 'Not found')"
+docker compose exec web python -c "import os; os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings'); import django; django.setup(); from accounts.models import Patent; p = Patent.objects.filter(publication_number='US20260123456A1').first(); print(p.title if p else 'Not found')"
 
 # List all searches
-docker compose run --rm web python -c "import os; os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings'); import django; django.setup(); from accounts.models import Search; print([(s.search_hash, s.search_query, s.patents.count()) for s in Search.objects.all()])"
+docker compose exec web python -c "import os; os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings'); import django; django.setup(); from accounts.models import Search; print([(s.search_hash[:12], s.search_query, s.patents.count()) for s in Search.objects.all()])"
+
+# Check how many entities are in the database
+docker compose exec web python -c "import os; os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings'); import django; django.setup(); from accounts.models import Entity; print('Total:', Entity.objects.count(), 'Inventors:', Entity.objects.filter(entity_type='inventor').count(), 'Applicants:', Entity.objects.filter(entity_type='applicant').count(), 'Assignees:', Entity.objects.filter(entity_type='assignee').count())"
+
+# Find entities by name
+docker compose exec web python -c "import os; os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings'); import django; django.setup(); from accounts.models import Entity; e = Entity.objects.filter(name='Microsoft').first(); print(e.name, e.entity_type, 'Patents:', e.patents.count(), 'Searches:', e.searches.count())"
 ```
 
 ## Command Line Options
@@ -100,20 +120,23 @@ python main.py data/ipa260115.zip --keywords "artificial intelligence,neural net
 ```
 
 ### --save-db
-Save extracted patents to the SQLite database. When used with extraction, patents are stored with full data including claims, inventors, applicants, and classifications.
+Save extracted patents and entities to the SQLite database. When used with extraction, patents are stored with full data including claims, inventors, applicants, and classifications.
 
-When used with search on patents already in the database, the search is attributed to matching patents.
+When used with search on patents already in the database, the search is attributed to matching patents and entities.
 
 Example:
 ```bash
-# Extract and save to database
+# Extract and save to database (patents + entities)
 python main.py data/ipa260115.zip --save-db
 
 # Extract directory and save all patents
 python main.py data/ --save-db
 
-# Search and attribute to database
+# Search and attribute to database (saves search + entities)
 python main.py patents.json --search "machine learning"
+
+# Extract with keyword filtering and save to database
+python main.py data/ --keywords "artificial intelligence" --save-db
 ```
 
 ### --search
@@ -185,30 +208,18 @@ When a directory path is provided, all ZIP files in that directory are processed
 python main.py data/ --search "battery" --search-cpc "H01M*"
 ```
 
-## Output Files
+## Output
 
-### Main Output JSON
-Contains:
-- Search date and query information
-- Source file information
-- Total patents searched and matched
-- List of matching patents with full data
-- Reference to entities file
+When running without `--save-db`, the tool outputs minimal progress information:
+- Total patents extracted
+- Total distinct entities found
 
-### Entities JSON
-Separate file containing distinct entities from matching patents:
-- Sorted lists of unique inventors, applicants, assignees
-- Combined list of all entities
+When running with `--save-db`, data is saved directly to the database:
+- Patents are stored in the Patent table
+- Entities (inventors, applicants, assignees) are stored in the Entity table
+- Searches are stored in the Search table with links to matching patents and entities
 
-Example entities structure:
-```json
-{
-  "inventors": ["Alice Smith", "Bob Jones", ...],
-  "applicants": ["Acme Corp", ...],
-  "assignees": ["Acme Corp", ...],
-  "all": ["Acme Corp", "Alice Smith", "Bob Jones", ...]
-}
-```
+Use tqdm for progress tracking - no more verbose console output.
 
 ## CPC Code Format
 

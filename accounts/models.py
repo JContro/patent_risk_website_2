@@ -105,3 +105,40 @@ class Search(models.Model):
     
     def __str__(self):
         return f"Search {self.search_hash[:16]}..."
+
+
+class Entity(models.Model):
+    """
+    Entity model representing inventors, applicants, and assignees extracted from patents.
+    """
+    ENTITY_TYPE_CHOICES = [
+        ('inventor', 'Inventor'),
+        ('applicant', 'Applicant'),
+        ('assignee', 'Assignee'),
+    ]
+    
+    # Primary key
+    entity_id = models.AutoField(primary_key=True)
+    
+    # Entity name
+    name = models.CharField(max_length=255, db_index=True)
+    
+    # Entity type
+    entity_type = models.CharField(max_length=20, choices=ENTITY_TYPE_CHOICES, db_index=True)
+    
+    # Many-to-many relationship with patents
+    patents = models.ManyToManyField(Patent, related_name='entities')
+    
+    # Many-to-many relationship with searches
+    searches = models.ManyToManyField(Search, related_name='entities')
+    
+    # Timestamps
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        ordering = ['name']
+        unique_together = ['name', 'entity_type']
+    
+    def __str__(self):
+        return f"{self.name} ({self.entity_type})"
