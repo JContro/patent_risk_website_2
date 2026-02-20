@@ -11,10 +11,13 @@ from django.contrib.sites.shortcuts import get_current_site
 from django.utils import timezone
 from django.contrib import messages
 from django.conf import settings
+from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
 import uuid
 
-from .models import User
+from .models import User, Patent, Entity
 from .forms import RegistrationForm
+from django.db.models import Q
+import json
 
 
 def landing(request):
@@ -164,3 +167,180 @@ def resend_verification(request):
             messages.error(request, 'No account found with that email.')
         return redirect('login')
     return render(request, 'accounts/resend_verification.html')
+
+
+def patent_list(request):
+    """
+    Display a paginated list of patents.
+    Users can click on a patent to view more details.
+    """
+    # Get all patents, ordered by publication date (newest first)
+    patents_list = Patent.objects.all().order_by('-publication_date', '-patent_id')
+    
+    # Number of patents per page
+    items_per_page = 10
+    
+    # Paginate the results
+    paginator = Paginator(patents_list, items_per_page)
+    
+    # Get the current page number from the request
+    page = request.GET.get('page', 1)
+    
+    try:
+        patents = paginator.page(page)
+    except PageNotAnInteger:
+        # If page is not an integer, deliver first page
+        patents = paginator.page(1)
+    except EmptyPage:
+        # If page is out of range, deliver last page
+        patents = paginator.page(paginator.num_pages)
+    
+    return render(request, 'accounts/patent_list.html', {
+        'patents': patents,
+    })
+
+
+def patent_detail(request, patent_id):
+    """
+    Display detailed information about a specific patent.
+    """
+    patent = get_object_or_404(Patent, patent_id=patent_id)
+    
+    return render(request, 'accounts/patent_detail.html', {
+        'patent': patent,
+    })
+
+
+def autocomplete_entities(request):
+    """
+    Autocomplete view for searching inventors, applicants, and assignees.
+    Returns JSON list of matching entity names.
+    Searches both the Entity table and Patent JSON fields for comprehensive results.
+    """
+    query = request.GET.get('q', '')
+    entity_type = request.GET.get('type', 'all')  # 'inventor', 'applicant', 'assignee', or 'all'
+    
+    if len(query) < 2:
+        return HttpResponse(json.dumps([]), content_type='application/json')
+    
+    results = set()
+    
+    # Search in Entity table first
+    if entity_type == 'all':
+        entities = Entity.objects.filter(
+            Q(name__icontains=query)
+        ).distinct().values_list('name', flat=True)[:10]
+    else:
+        entities = Entity.objects.filter(
+            Q(name__icontains=query) & Q(entity_type=entity_type)
+        ).distinct().values_list('name', flat=True)[:10]
+    
+    for e in entities:
+        results.add(e)
+    
+    # Also search in Patent JSON fields for inventors and applicants
+    if entity_type in ['all', 'inventor']:
+        # Search inventors in Patent model
+        patents_with_inventor = Patent.objects.filter(
+            inventors__isnull=False
+        ).values_list('inventors', flat=True)[:100]
+        
+        for inventors_list in patents_with_inventor:
+            if inventors_list and isinstance(inventors_list, list):
+                for inventor in inventors_list:
+                    if isinstance(inventor, dict):
+                        # Handle dict format with first_name and last_name
+                        first_name = inventor.get('first_name', '') or ''
+                        last_name = inventor.get('last_name', '') or ''
+                        full_name = f"{first_name} {last_name}".strip()
+                        if full_name and query.lower() in full_name.lower():
+                            results.add(full_name)
+    
+    if entity_type in ['all', 'applicant']:
+        # Search applicants in Patent model
+        patents_with_applicant = Patent.objects.filter(
+            applicants__isnull=False
+        ).values_list('applicants', flat=True)[:100]
+        
+        for applicants_list in patents_with_applicant:
+            if applicants_list and isinstance(applicants_list, list):
+                for applicant in applicants_list:
+                    if isinstance(applicant, dict):
+                        # For applicants, use organization if first/last name are not available
+                        organization = applicant.get('organization', '')
+                        first_name = applicant.get('first_name', '') or ''
+                        last_name = applicant.get('last_name', '') or ''
+                        
+                        if first_name or last_name:
+                            full_name = f"{first_name} {last_name}".strip()
+                            if full_name and query.lower() in full_name.lower():
+                                results.add(full_name)
+                        elif organization and query.lower() in organization.lower():
+                            results.add(organization)
+    
+    # Convert to sorted list and return as JSON (limit to 10)
+    sorted_results = sorted(list(results))[:10]
+    return HttpResponse(json.dumps(sorted_results), content_type='application/json')
+
+
+def search_patents(request):
+    """
+    Search patents by various fields including inventor, applicant, and assignee.
+    """
+    query = request.GET.get('q', '')
+    inventor = request.GET.get('inventor', '')
+    applicant = request.GET.get('applicant', '')
+    assignee = request.GET.get('assignee', '')  # Owner
+    
+    # Start with all patents
+    patents = Patent.objects.all()
+    
+    # Filter by general query (title, abstract, publication number)
+    if query:
+        patents = patents.filter(
+            Q(title__icontains=query) |
+            Q(abstract__icontains=query) |
+            Q(publication_number__icontains=query)
+        )
+    
+    # Filter by inventor
+    if inventor:
+        patents = patents.filter(
+            Q(inventors__icontains=inventor)
+        ).distinct()
+    
+    # Filter by applicant
+    if applicant:
+        patents = patents.filter(
+            Q(applicants__icontains=applicant)
+        ).distinct()
+    
+    # Filter by assignee (owner) - using Entity model
+    if assignee:
+        assignee_entities = Entity.objects.filter(
+            Q(name__icontains=assignee) & Q(entity_type='assignee')
+        ).values_list('patent_id', flat=True)
+        patents = patents.filter(patent_id__in=assignee_entities)
+    
+    # Order by publication date (newest first)
+    patents = patents.order_by('-publication_date', '-patent_id')
+    
+    # Paginate results
+    items_per_page = 10
+    paginator = Paginator(patents, items_per_page)
+    page = request.GET.get('page', 1)
+    
+    try:
+        patents_page = paginator.page(page)
+    except PageNotAnInteger:
+        patents_page = paginator.page(1)
+    except EmptyPage:
+        patents_page = paginator.page(paginator.num_pages)
+    
+    return render(request, 'accounts/patent_list.html', {
+        'patents': patents_page,
+        'search_query': query,
+        'search_inventor': inventor,
+        'search_applicant': applicant,
+        'search_assignee': assignee,
+    })

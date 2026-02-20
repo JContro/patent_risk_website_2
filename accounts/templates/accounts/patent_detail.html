@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ patent.publication_number }} - Patent Risk Radar</title>
+    <style>
+        /* Reset & Base */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: linear-gradient(135deg, #f5f7ff 0%, #e3e9ff 100%);
+            min-height: 100vh;
+            color: #1d1d1f;
+            padding: 2rem;
+        }
+
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+
+        /* Header */
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 2rem;
+            padding-bottom: 1.5rem;
+            border-bottom: 1px solid rgba(0, 113, 227, 0.2);
+        }
+
+        .logo {
+            font-size: 2.2rem;
+            font-weight: 800;
+            background: linear-gradient(90deg, #0071e3, #00a2ff, #7d64ff);
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+            letter-spacing: -0.03em;
+            text-decoration: none;
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 1.5rem;
+        }
+
+        .nav-link {
+            color: #0071e3;
+            text-decoration: none;
+            font-weight: 600;
+            padding: 0.5rem 1rem;
+            border-radius: 50px;
+            transition: all 0.3s;
+        }
+
+        .nav-link:hover {
+            background: rgba(0, 113, 227, 0.1);
+        }
+
+        /* Back Button */
+        .back-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            color: #0071e3;
+            text-decoration: none;
+            font-weight: 600;
+            margin-bottom: 2rem;
+            transition: all 0.3s;
+        }
+
+        .back-link:hover {
+            transform: translateX(-5px);
+        }
+
+        /* Patent Card */
+        .patent-card {
+            background: white;
+            border-radius: 20px;
+            padding: 2.5rem;
+            box-shadow: 0 4px 20px rgba(0, 113, 227, 0.1);
+        }
+
+        .patent-header {
+            margin-bottom: 2rem;
+            padding-bottom: 1.5rem;
+            border-bottom: 1px solid rgba(0, 113, 227, 0.1);
+        }
+
+        .patent-number {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: #0071e3;
+            margin-bottom: 0.5rem;
+        }
+
+        .patent-date {
+            color: #6e6e73;
+            font-size: 1rem;
+        }
+
+        .patent-title {
+            font-size: 1.8rem;
+            font-weight: 700;
+            margin-bottom: 1rem;
+            color: #1d1d1f;
+            line-height: 1.3;
+        }
+
+        /* Sections */
+        .section {
+            margin-bottom: 2rem;
+        }
+
+        .section-title {
+            font-size: 1.2rem;
+            font-weight: 700;
+            color: #0071e3;
+            margin-bottom: 1rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 2px solid rgba(0, 113, 227, 0.2);
+        }
+
+        .section-content {
+            color: #1d1d1f;
+            line-height: 1.7;
+            font-size: 1rem;
+        }
+
+        /* Abstract */
+        .abstract {
+            background: linear-gradient(135deg, #f8f9ff 0%, #eef2ff 100%);
+            padding: 1.5rem;
+            border-radius: 12px;
+            border-left: 4px solid #0071e3;
+        }
+
+        /* Classifications */
+        .classifications {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+        }
+
+        .classification-tag {
+            background: linear-gradient(90deg, #0071e3, #7d64ff);
+            color: white;
+            padding: 0.4rem 1rem;
+            border-radius: 50px;
+            font-size: 0.9rem;
+            font-weight: 500;
+        }
+
+        /* Inventors & Applicants */
+        .people-list {
+            list-style: none;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .people-item {
+            background: #f8f9ff;
+            padding: 0.75rem 1rem;
+            border-radius: 8px;
+        }
+
+        /* Claims */
+        .claims-list {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        .claim-item {
+            background: #f8f9ff;
+            padding: 1rem;
+            border-radius: 10px;
+            border-left: 3px solid #7d64ff;
+        }
+
+        .claim-number {
+            font-weight: 700;
+            color: #7d64ff;
+            margin-bottom: 0.5rem;
+        }
+
+        /* Metadata */
+        .metadata-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+        }
+
+        .metadata-item {
+            background: #f8f9ff;
+            padding: 1rem;
+            border-radius: 10px;
+        }
+
+        .metadata-label {
+            font-size: 0.85rem;
+            color: #6e6e73;
+            margin-bottom: 0.25rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .metadata-value {
+            font-weight: 600;
+            color: #1d1d1f;
+        }
+
+        /* Empty state styling */
+        .empty-value {
+            color: #6e6e73;
+            font-style: italic;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <a href="{% url 'dashboard' %}" class="logo">Patent Risk Radar</a>
+            <nav class="nav-links">
+                <a href="{% url 'dashboard' %}" class="nav-link">Dashboard</a>
+                <a href="{% url 'patent_list' %}" class="nav-link">Patents</a>
+                <a href="{% url 'logout' %}" class="nav-link">Logout</a>
+            </nav>
+        </header>
+
+        <a href="{% url 'patent_list' %}" class="back-link">← Back to Patents</a>
+
+        <div class="patent-card">
+            <div class="patent-header">
+                <div class="patent-number">{{ patent.publication_number }}</div>
+                <div class="patent-date">
+                    {% if patent.publication_date %}
+                        Published: {{ patent.publication_date|date:"F d, Y" }}
+                    {% endif %}
+                    {% if patent.application_date %}
+                        | Application Filed: {{ patent.application_date|date:"F d, Y" }}
+                    {% endif %}
+                </div>
+                <h1 class="patent-title">
+                    {% if patent.title %}
+                        {{ patent.title }}
+                    {% else %}
+                        Untitled Patent
+                    {% endif %}
+                </h1>
+            </div>
+
+            <!-- Abstract Section -->
+            <div class="section">
+                <h2 class="section-title">Abstract</h2>
+                <div class="abstract section-content">
+                    {% if patent.abstract %}
+                        {{ patent.abstract }}
+                    {% else %}
+                        <span class="empty-value">No abstract available.</span>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Classifications Section -->
+            {% if patent.classifications_cpc_main or patent.classifications_ipcr or patent.classifications_cpc_further %}
+                <div class="section">
+                    <h2 class="section-title">Classifications</h2>
+                    
+                    {% if patent.classifications_cpc_main %}
+                        <p class="section-content"><strong>CPC Main:</strong></p>
+                        <div class="classifications">
+                            {% for cls in patent.classifications_cpc_main %}
+                                <span class="classification-tag">{{ cls }}</span>
+                            {% endfor %}
+                        </div>
+                    {% endif %}
+
+                    {% if patent.classifications_cpc_further %}
+                        <p class="section-content" style="margin-top: 1rem;"><strong>CPC Further:</strong></p>
+                        <div class="classifications">
+                            {% for cls in patent.classifications_cpc_further %}
+                                <span class="classification-tag">{{ cls }}</span>
+                            {% endfor %}
+                        </div>
+                    {% endif %}
+
+                    {% if patent.classifications_ipcr %}
+                        <p class="section-content" style="margin-top: 1rem;"><strong>IPCR:</strong></p>
+                        <div class="classifications">
+                            {% for cls in patent.classifications_ipcr %}
+                                <span class="classification-tag">{{ cls }}</span>
+                            {% endfor %}
+                        </div>
+                    {% endif %}
+                </div>
+            {% endif %}
+
+            <!-- Inventors Section -->
+            {% if patent.inventors %}
+                <div class="section">
+                    <h2 class="section-title">Inventors</h2>
+                    <ul class="people-list">
+                        {% for inventor in patent.inventors %}
+                            <li class="people-item">
+                                {% if inventor.name %}
+                                    {{ inventor.name }}
+                                {% elif inventor.first_name or inventor.last_name %}
+                                    {{ inventor.first_name|default:"" }} {{ inventor.last_name|default:"" }}
+                                {% else %}
+                                    <span class="empty-value">Inventor info not available</span>
+                                {% endif %}
+                            </li>
+                        {% endfor %}
+                    </ul>
+                </div>
+            {% endif %}
+
+            <!-- Applicants Section -->
+            {% if patent.applicants %}
+                <div class="section">
+                    <h2 class="section-title">Applicants</h2>
+                    <ul class="people-list">
+                        {% for applicant in patent.applicants %}
+                            <li class="people-item">
+                                {% if applicant.name %}
+                                    {{ applicant.name }}
+                                {% elif applicant.first_name or applicant.last_name %}
+                                    {{ applicant.first_name|default:"" }} {{ applicant.last_name|default:"" }}
+                                {% else %}
+                                    <span class="empty-value">Applicant info not available</span>
+                                {% endif %}
+                            </li>
+                        {% endfor %}
+                    </ul>
+                </div>
+            {% endif %}
+
+            <!-- Claims Section -->
+            {% if patent.claims %}
+                <div class="section">
+                    <h2 class="section-title">Claims</h2>
+                    <div class="claims-list">
+                        {% for claim in patent.claims %}
+                            <div class="claim-item">
+                                <div class="claim-number">Claim {{ forloop.counter }}</div>
+                                <div class="section-content">
+                                    {% if claim.claim_text %}
+                                        {{ claim.claim_text }}
+                                    {% else %}
+                                        <span class="empty-value">Claim text not available</span>
+                                    {% endif %}
+                                </div>
+                            </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            {% endif %}
+
+            <!-- Priority Claims Section -->
+            {% if patent.priority_claims %}
+                <div class="section">
+                    <h2 class="section-title">Priority Claims</h2>
+                    <div class="claims-list">
+                        {% for claim in patent.priority_claims %}
+                            <div class="claim-item">
+                                <div class="section-content">
+                                    {% if claim.application_number %}
+                                        Application: {{ claim.application_number }}
+                                    {% endif %}
+                                    {% if claim.country %}
+                                        | Country: {{ claim.country }}
+                                    {% endif %}
+                                    {% if claim.priority_date %}
+                                        | Date: {{ claim.priority_date }}
+                                    {% endif %}
+                                </div>
+                            </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            {% endif %}
+
+            <!-- Metadata Section -->
+            <div class="section">
+                <h2 class="section-title">Patent Information</h2>
+                <div class="metadata-grid">
+                    {% if patent.application_number %}
+                        <div class="metadata-item">
+                            <div class="metadata-label">Application Number</div>
+                            <div class="metadata-value">{{ patent.application_number }}</div>
+                        </div>
+                    {% endif %}
+
+                    {% if patent.publication_kind %}
+                        <div class="metadata-item">
+                            <div class="metadata-label">Publication Kind</div>
+                            <div class="metadata-value">{{ patent.publication_kind }}</div>
+                        </div>
+                    {% endif %}
+
+                    {% if patent.application_type %}
+                        <div class="metadata-item">
+                            <div class="metadata-label">Application Type</div>
+                            <div class="metadata-value">{{ patent.application_type }}</div>
+                        </div>
+                    {% endif %}
+
+                    {% if patent.application_series_code %}
+                        <div class="metadata-item">
+                            <div class="metadata-label">Application Series Code</div>
+                            <div class="metadata-value">{{ patent.application_series_code }}</div>
+                        </div>
+                    {% endif %}
+
+                    {% if patent.language %}
+                        <div class="metadata-item">
+                            <div class="metadata-label">Language</div>
+                            <div class="metadata-value">{{ patent.language }}</div>
+                        </div>
+                    {% endif %}
+
+                    {% if patent.source_file %}
+                        <div class="metadata-item">
+                            <div class="metadata-label">Source File</div>
+                            <div class="metadata-value">{{ patent.source_file }}</div>
+                        </div>
+                    {% endif %}
+
+                    {% if patent.production_date %}
+                        <div class="metadata-item">
+                            <div class="metadata-label">Production Date</div>
+                            <div class="metadata-value">{{ patent.production_date|date:"F d, Y" }}</div>
+                        </div>
+                    {% endif %}
+
+                    {% if patent.extracted_at %}
+                        <div class="metadata-item">
+                            <div class="metadata-label">Extracted At</div>
+                            <div class="metadata-value">{{ patent.extracted_at|date:"F d, Y H:i" }}</div>
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

@@ -9,6 +9,11 @@ urlpatterns = [
     path('logout/', LogoutView.as_view(next_page='landing'), name='logout'),
     path('profile/', views.profile, name='profile'),
     path('dashboard/', views.dashboard, name='dashboard'),
+    path('patents/', views.patent_list, name='patent_list'),
+    path('patents/<int:patent_id>/', views.patent_detail, name='patent_detail'),
     path('verify/<uidb64>/<token>/', views.verify_email, name='verify_email'),
     path('resend-verification/', views.resend_verification, name='resend_verification'),
+    # Autocomplete and search URLs
+    path('autocomplete/entities/', views.autocomplete_entities, name='autocomplete_entities'),
+    path('search/', views.search_patents, name='search_patents'),
 ]

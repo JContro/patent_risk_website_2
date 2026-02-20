@@ -196,6 +196,118 @@
             border-top: 1px solid rgba(0, 113, 227, 0.2);
         }
 
+        /* Search Form */
+        .search-form {
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+            margin-top: 2rem;
+        }
+        
+        .search-field {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+        
+        .search-field label {
+            font-weight: 600;
+            color: #1d1d1f;
+            font-size: 1rem;
+        }
+        
+        .search-field input {
+            padding: 0.8rem 1rem;
+            border: 2px solid rgba(0, 113, 227, 0.2);
+            border-radius: 12px;
+            font-size: 1rem;
+            transition: all 0.3s;
+            background: white;
+        }
+        
+        .search-field input:focus {
+            outline: none;
+            border-color: #0071e3;
+            box-shadow: 0 0 0 4px rgba(0, 113, 227, 0.1);
+        }
+        
+        /* Autocomplete Styles */
+        .autocomplete-wrapper {
+            position: relative;
+        }
+        
+        .autocomplete-suggestions {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            background: white;
+            border: 1px solid rgba(0, 113, 227, 0.2);
+            border-radius: 12px;
+            box-shadow: 0 10px 30px rgba(0, 113, 227, 0.15);
+            max-height: 200px;
+            overflow-y: auto;
+            z-index: 1000;
+            display: none;
+            margin-top: 0.25rem;
+        }
+        
+        .autocomplete-suggestions.active {
+            display: block;
+        }
+        
+        .autocomplete-suggestion {
+            padding: 0.75rem 1rem;
+            cursor: pointer;
+            transition: background 0.2s;
+            border-bottom: 1px solid rgba(0, 113, 227, 0.1);
+        }
+        
+        .autocomplete-suggestion:last-child {
+            border-bottom: none;
+        }
+        
+        .autocomplete-suggestion:hover {
+            background: rgba(0, 113, 227, 0.1);
+        }
+        
+        .autocomplete-suggestion.highlighted {
+            background: rgba(0, 113, 227, 0.15);
+        }
+        
+        /* Search Button */
+        .search-button {
+            background: linear-gradient(90deg, #0071e3, #00a2ff);
+            color: white;
+            border: none;
+            padding: 1rem 2rem;
+            border-radius: 50px;
+            font-size: 1.1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            margin-top: 1rem;
+        }
+        
+        .search-button:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 10px 25px rgba(0, 113, 227, 0.4);
+        }
+        
+        /* Search Hint */
+        .search-hint {
+            margin-top: 1.5rem;
+            padding: 1rem;
+            background: rgba(0, 113, 227, 0.05);
+            border-radius: 12px;
+            color: #6e6e73;
+            font-size: 0.9rem;
+        }
+        
+        .search-hint p {
+            margin: 0;
+        }
+
         /* Responsive */
         @media (max-width: 768px) {
             .header {
@@ -252,10 +364,45 @@
 
         <div id="search" class="tab-content">
             <h2>Search AI Patents</h2>
-            <p>Search for AI‑related patents and assess their dual‑use and civic risks. Filter by technology, assignee, risk level, and more.</p>
-            <div class="placeholder">
-                <h3>Search Interface Coming Soon</h3>
-                <p>The search functionality is being built. You'll be able to explore patent data, apply risk filters, and export results.</p>
+            <p>Search for AI‑related patents and assess their dual‑use and civic risks. Filter by inventor, applicant, owner, and more.</p>
+            
+            <form action="/accounts/search/" method="get" class="search-form">
+                <!-- General Search -->
+                <div class="search-field">
+                    <label for="general-search">General Search</label>
+                    <input type="text" id="general-search" name="q" placeholder="Search by title, abstract, or patent number..."
+                           value="{{ search_query|default:'' }}">
+                </div>
+                
+                <!-- Inventor Search with Autocomplete -->
+                <div class="search-field autocomplete-wrapper">
+                    <label for="inventor-search">Inventor</label>
+                    <input type="text" id="inventor-search" name="inventor" placeholder="Start typing inventor name..."
+                           value="{{ search_inventor|default:'' }}" autocomplete="off">
+                    <div class="autocomplete-suggestions" id="inventor-suggestions"></div>
+                </div>
+                
+                <!-- Applicant Search with Autocomplete -->
+                <div class="search-field autocomplete-wrapper">
+                    <label for="applicant-search">Applicant</label>
+                    <input type="text" id="applicant-search" name="applicant" placeholder="Start typing applicant name..."
+                           value="{{ search_applicant|default:'' }}" autocomplete="off">
+                    <div class="autocomplete-suggestions" id="applicant-suggestions"></div>
+                </div>
+                
+                <!-- Owner (Assignee) Search with Autocomplete -->
+                <div class="search-field autocomplete-wrapper">
+                    <label for="owner-search">Owner / Assignee</label>
+                    <input type="text" id="owner-search" name="assignee" placeholder="Start typing owner name..."
+                           value="{{ search_assignee|default:'' }}" autocomplete="off">
+                    <div class="autocomplete-suggestions" id="owner-suggestions"></div>
+                </div>
+                
+                <button type="submit" class="search-button">Search Patents</button>
+            </form>
+            
+            <div class="search-hint">
+                <p>Tip: Use any combination of fields to narrow your search. Leave fields empty to see all patents.</p>
             </div>
         </div>
 
@@ -286,6 +433,151 @@
                     }
                 });
             });
+        });
+        
+        // Autocomplete functionality
+        class Autocomplete {
+            constructor(inputElement, suggestionsElement, entityType) {
+                this.input = inputElement;
+                this.suggestions = suggestionsElement;
+                this.entityType = entityType;
+                this.selectedIndex = -1;
+                this.items = [];
+                
+                this.setupEventListeners();
+            }
+            
+            setupEventListeners() {
+                // Input event
+                this.input.addEventListener('input', () => this.handleInput());
+                
+                // Keyboard navigation
+                this.input.addEventListener('keydown', (e) => this.handleKeydown(e));
+                
+                // Click outside to close
+                document.addEventListener('click', (e) => {
+                    if (!this.input.contains(e.target) && !this.suggestions.contains(e.target)) {
+                        this.hideSuggestions();
+                    }
+                });
+                
+                // Focus to show existing suggestions if input has value
+                this.input.addEventListener('focus', () => {
+                    if (this.input.value.length >= 2) {
+                        this.handleInput();
+                    }
+                });
+            }
+            
+            async handleInput() {
+                const query = this.input.value.trim();
+                
+                if (query.length < 2) {
+                    this.hideSuggestions();
+                    return;
+                }
+                
+                try {
+                    const response = await fetch(`/accounts/autocomplete/entities/?q=${encodeURIComponent(query)}&type=${this.entityType}`);
+                    const data = await response.json();
+                    this.items = data;
+                    this.selectedIndex = -1;
+                    
+                    if (data.length > 0) {
+                        this.showSuggestions(data);
+                    } else {
+                        this.hideSuggestions();
+                    }
+                } catch (error) {
+                    console.error('Autocomplete error:', error);
+                    this.hideSuggestions();
+                }
+            }
+            
+            showSuggestions(items) {
+                this.suggestions.innerHTML = items.map((item, index) =>
+                    `<div class="autocomplete-suggestion" data-index="${index}">${item}</div>`
+                ).join('');
+                
+                this.suggestions.classList.add('active');
+                
+                // Add click listeners to suggestions
+                this.suggestions.querySelectorAll('.autocomplete-suggestion').forEach(el => {
+                    el.addEventListener('click', () => {
+                        const index = parseInt(el.dataset.index);
+                        this.selectItem(index);
+                    });
+                });
+            }
+            
+            hideSuggestions() {
+                this.suggestions.classList.remove('active');
+                this.selectedIndex = -1;
+            }
+            
+            selectItem(index) {
+                if (index >= 0 && index < this.items.length) {
+                    this.input.value = this.items[index];
+                    this.hideSuggestions();
+                    this.input.focus();
+                }
+            }
+            
+            handleKeydown(e) {
+                const items = this.suggestions.querySelectorAll('.autocomplete-suggestion');
+                
+                switch(e.key) {
+                    case 'ArrowDown':
+                        e.preventDefault();
+                        this.selectedIndex = Math.min(this.selectedIndex + 1, items.length - 1);
+                        this.updateHighlight(items);
+                        break;
+                    case 'ArrowUp':
+                        e.preventDefault();
+                        this.selectedIndex = Math.max(this.selectedIndex - 1, 0);
+                        this.updateHighlight(items);
+                        break;
+                    case 'Enter':
+                        e.preventDefault();
+                        if (this.selectedIndex >= 0) {
+                            this.selectItem(this.selectedIndex);
+                        }
+                        break;
+                    case 'Escape':
+                        this.hideSuggestions();
+                        break;
+                }
+            }
+            
+            updateHighlight(items) {
+                items.forEach((el, index) => {
+                    if (index === this.selectedIndex) {
+                        el.classList.add('highlighted');
+                        el.scrollIntoView({ block: 'nearest' });
+                    } else {
+                        el.classList.remove('highlighted');
+                    }
+                });
+            }
+        }
+        
+        // Initialize autocomplete for each field
+        document.addEventListener('DOMContentLoaded', () => {
+            const inventorInput = document.getElementById('inventor-search');
+            const applicantInput = document.getElementById('applicant-search');
+            const ownerInput = document.getElementById('owner-search');
+            
+            if (inventorInput && document.getElementById('inventor-suggestions')) {
+                new Autocomplete(inventorInput, document.getElementById('inventor-suggestions'), 'inventor');
+            }
+            
+            if (applicantInput && document.getElementById('applicant-suggestions')) {
+                new Autocomplete(applicantInput, document.getElementById('applicant-suggestions'), 'applicant');
+            }
+            
+            if (ownerInput && document.getElementById('owner-suggestions')) {
+                new Autocomplete(ownerInput, document.getElementById('owner-suggestions'), 'assignee');
+            }
         });
     </script>
 </body>
