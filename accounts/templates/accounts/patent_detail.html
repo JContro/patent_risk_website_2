@@ -227,6 +227,7 @@
             <a href="{% url 'dashboard' %}" class="logo">Patent Risk Radar</a>
             <nav class="nav-links">
                 <a href="{% url 'dashboard' %}" class="nav-link">Dashboard</a>
+                <a href="{% url 'search_patents' %}" class="nav-link">Search</a>
                 <a href="{% url 'patent_list' %}" class="nav-link">Patents</a>
                 <a href="{% url 'logout' %}" class="nav-link">Logout</a>
             </nav>
@@ -329,6 +330,8 @@
                             <li class="people-item">
                                 {% if applicant.name %}
                                     {{ applicant.name }}
+                                {% elif applicant.organization %}
+                                    {{ applicant.organization }}
                                 {% elif applicant.first_name or applicant.last_name %}
                                     {{ applicant.first_name|default:"" }} {{ applicant.last_name|default:"" }}
                                 {% else %}

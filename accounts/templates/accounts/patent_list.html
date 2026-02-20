@@ -213,6 +213,48 @@
             padding: 2rem;
             color: #6e6e73;
         }
+
+        /* Search Info */
+        .search-info {
+            background: white;
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+            box-shadow: 0 2px 10px rgba(0, 113, 227, 0.08);
+        }
+
+        .search-info p {
+            color: #6e6e73;
+            margin-bottom: 1rem;
+            font-weight: 500;
+        }
+
+        .search-tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+        }
+
+        .search-tag {
+            background: linear-gradient(90deg, #0071e3, #7d64ff);
+            color: white;
+            padding: 0.5rem 1rem;
+            border-radius: 50px;
+            font-size: 0.9rem;
+            font-weight: 500;
+        }
+
+        .clear-search {
+            color: #0071e3;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 0.9rem;
+        }
+
+        .clear-search:hover {
+            text-decoration: underline;
+        }
     </style>
 </head>
 <body>
@@ -221,12 +263,41 @@
             <a href="{% url 'dashboard' %}" class="logo">Patent Risk Radar</a>
             <nav class="nav-links">
                 <a href="{% url 'dashboard' %}" class="nav-link">Dashboard</a>
+                <a href="{% url 'search_patents' %}" class="nav-link">Search</a>
                 <a href="{% url 'patent_list' %}" class="nav-link">Patents</a>
                 <a href="{% url 'logout' %}" class="nav-link">Logout</a>
             </nav>
         </header>
 
-        <h1 class="page-title">Patents</h1>
+        <h1 class="page-title">
+            {% if search_query or search_inventor or search_applicant or search_assignee %}
+                Search Results
+            {% else %}
+                Patents
+            {% endif %}
+        </h1>
+
+        <!-- Display current search query -->
+        {% if search_query or search_inventor or search_applicant or search_assignee %}
+            <div class="search-info">
+                <p>Showing results for:</p>
+                <div class="search-tags">
+                    {% if search_query %}
+                        <span class="search-tag">Query: {{ search_query }}</span>
+                    {% endif %}
+                    {% if search_inventor %}
+                        <span class="search-tag">Inventor: {{ search_inventor }}</span>
+                    {% endif %}
+                    {% if search_applicant %}
+                        <span class="search-tag">Applicant: {{ search_applicant }}</span>
+                    {% endif %}
+                    {% if search_assignee %}
+                        <span class="search-tag">Assignee: {{ search_assignee }}</span>
+                    {% endif %}
+                </div>
+                <a href="{% url 'patent_list' %}" class="clear-search">Clear search</a>
+            </div>
+        {% endif %}
 
         {% if patents %}
             <div class="patent-list">
@@ -272,7 +343,7 @@
                 <div class="pagination">
                     <!-- Previous page -->
                     {% if patents.has_previous %}
-                        <a href="?page={{ patents.previous_page_number }}" class="pagination-btn">Previous</a>
+                        <a href="?{% if search_query %}q={{ search_query }}&{% endif %}{% if search_inventor %}inventor={{ search_inventor }}&{% endif %}{% if search_applicant %}applicant={{ search_applicant }}&{% endif %}{% if search_assignee %}assignee={{ search_assignee }}&{% endif %}page={{ patents.previous_page_number }}" class="pagination-btn">Previous</a>
                     {% else %}
                         <span class="pagination-btn disabled">Previous</span>
                     {% endif %}
@@ -282,13 +353,13 @@
                         {% if num == patents.number %}
                             <span class="page-number active">{{ num }}</span>
                         {% elif num > patents.number|add:'-3' and num < patents.number|add:'3' %}
-                            <a href="?page={{ num }}" class="page-number">{{ num }}</a>
+                            <a href="?{% if search_query %}q={{ search_query }}&{% endif %}{% if search_inventor %}inventor={{ search_inventor }}&{% endif %}{% if search_applicant %}applicant={{ search_applicant }}&{% endif %}{% if search_assignee %}assignee={{ search_assignee }}&{% endif %}page={{ num }}" class="page-number">{{ num }}</a>
                         {% endif %}
                     {% endfor %}
 
                     <!-- Next page -->
                     {% if patents.has_next %}
-                        <a href="?page={{ patents.next_page_number }}" class="pagination-btn">Next</a>
+                        <a href="?{% if search_query %}q={{ search_query }}&{% endif %}{% if search_inventor %}inventor={{ search_inventor }}&{% endif %}{% if search_applicant %}applicant={{ search_applicant }}&{% endif %}{% if search_assignee %}assignee={{ search_assignee }}&{% endif %}page={{ patents.next_page_number }}" class="pagination-btn">Next</a>
                     {% else %}
                         <span class="pagination-btn disabled">Next</span>
                     {% endif %}

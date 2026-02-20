@@ -197,6 +197,10 @@ def patent_list(request):
     
     return render(request, 'accounts/patent_list.html', {
         'patents': patents,
+        'search_query': request.GET.get('q', ''),
+        'search_inventor': request.GET.get('inventor', ''),
+        'search_applicant': request.GET.get('applicant', ''),
+        'search_assignee': request.GET.get('assignee', ''),
     })
 
 
@@ -317,10 +321,12 @@ def search_patents(request):
     
     # Filter by assignee (owner) - using Entity model
     if assignee:
-        assignee_entities = Entity.objects.filter(
-            Q(name__icontains=assignee) & Q(entity_type='assignee')
-        ).values_list('patent_id', flat=True)
-        patents = patents.filter(patent_id__in=assignee_entities)
+        # Use the reverse ManyToMany relation from Patent to Entity
+        # The Entity model has patents=ManyToManyField(Patent), so we access via 'entities'
+        patents = patents.filter(
+            entities__name__icontains=assignee,
+            entities__entity_type='assignee'
+        ).distinct()
     
     # Order by publication date (newest first)
     patents = patents.order_by('-publication_date', '-patent_id')
