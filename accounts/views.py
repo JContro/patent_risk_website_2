@@ -14,7 +14,7 @@ from django.conf import settings
 from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
 import uuid
 
-from .models import User, Patent, Entity
+from .models import User, Patent, Entity, Analysis
 from .forms import RegistrationForm
 from django.db.models import Q
 import json
@@ -174,8 +174,8 @@ def patent_list(request):
     Display a paginated list of patents.
     Users can click on a patent to view more details.
     """
-    # Get all patents, ordered by publication date (newest first)
-    patents_list = Patent.objects.all().order_by('-publication_date', '-patent_id')
+    # Get all patents with their analysis (if any), ordered by publication date (newest first)
+    patents_list = Patent.objects.select_related('analysis').all().order_by('-publication_date', '-patent_id')
     
     # Number of patents per page
     items_per_page = 10
@@ -209,10 +209,31 @@ def patent_detail(request, patent_id):
     Display detailed information about a specific patent.
     """
     patent = get_object_or_404(Patent, patent_id=patent_id)
+    is_analysed = hasattr(patent, 'analysis')
     
     return render(request, 'accounts/patent_detail.html', {
         'patent': patent,
+        'is_analysed': is_analysed,
     })
+
+
+def analyse_patent(request, patent_id):
+    """
+    Create an analysis entry for a patent.
+    For now, this is a simple placeholder that marks the patent as analysed.
+    """
+    patent = get_object_or_404(Patent, patent_id=patent_id)
+    
+    # Check if already analysed
+    if not hasattr(patent, 'analysis'):
+        # Create a new analysis entry
+        Analysis.objects.create(patent=patent)
+        messages.success(request, f'Patent {patent.publication_number} has been analysed.')
+    else:
+        messages.info(request, f'Patent {patent.publication_number} is already analysed.')
+    
+    # Redirect back to the patent detail page
+    return redirect('patent_detail', patent_id=patent_id)
 
 
 def autocomplete_entities(request):

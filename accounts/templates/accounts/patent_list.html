@@ -143,6 +143,56 @@
             font-weight: 500;
         }
 
+        /* Analysis Badge */
+        .analysis-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.25rem;
+            background: linear-gradient(90deg, #34c759, #30d158);
+            color: white;
+            padding: 0.25rem 0.75rem;
+            border-radius: 50px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            margin-left: 0.5rem;
+        }
+
+        /* Analyse Button */
+        .analyse-btn {
+            background: linear-gradient(90deg, #0071e3, #5856d6);
+            color: white;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 50px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            cursor: pointer;
+            text-decoration: none;
+            transition: all 0.3s;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.25rem;
+        }
+
+        .analyse-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 113, 227, 0.3);
+        }
+
+        .analyse-btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        .patent-actions {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            margin-top: 0.75rem;
+        }
+
         /* Pagination */
         .pagination {
             display: flex;
@@ -263,7 +313,7 @@
             <a href="{% url 'dashboard' %}" class="logo">Patent Risk Radar</a>
             <nav class="nav-links">
                 <a href="{% url 'dashboard' %}" class="nav-link">Dashboard</a>
-                <a href="{% url 'search_patents' %}" class="nav-link">Search</a>
+                <a href="{% url 'dashboard' %}?tab=search" class="nav-link">Search</a>
                 <a href="{% url 'patent_list' %}" class="nav-link">Patents</a>
                 <a href="{% url 'logout' %}" class="nav-link">Logout</a>
             </nav>
@@ -334,6 +384,14 @@
                                 {% endfor %}
                             </div>
                         {% endif %}
+                        
+                        <div class="patent-actions">
+                            {% if patent.analysis %}
+                                <span class="analysis-badge">✓ Analysed</span>
+                            {% else %}
+                                <a href="{% url 'analyse_patent' patent.patent_id %}" class="analyse-btn">Analyse</a>
+                            {% endif %}
+                        </div>
                     </a>
                 {% endfor %}
             </div>

@@ -142,3 +142,25 @@ class Entity(models.Model):
     
     def __str__(self):
         return f"{self.name} ({self.entity_type})"
+
+
+class Analysis(models.Model):
+    """
+    Analysis model representing a patent analysis/classification.
+    For now, a simple entry marks the patent as "analysed".
+    Full implementation with classification details will come later.
+    """
+    # Primary key
+    analysis_id = models.AutoField(primary_key=True)
+    
+    # Foreign key to Patent
+    patent = models.OneToOneField(Patent, on_delete=models.CASCADE, related_name='analysis')
+    
+    # Timestamp
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        ordering = ['-created_at']
+    
+    def __str__(self):
+        return f"Analysis for Patent {self.patent.publication_number}"

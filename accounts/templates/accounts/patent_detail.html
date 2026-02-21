@@ -97,6 +97,54 @@
             margin-bottom: 0.5rem;
         }
 
+        /* Analysis Badge */
+        .analysis-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.25rem;
+            background: linear-gradient(90deg, #34c759, #30d158);
+            color: white;
+            padding: 0.5rem 1rem;
+            border-radius: 50px;
+            font-size: 0.9rem;
+            font-weight: 600;
+            margin-left: 1rem;
+        }
+
+        /* Analyse Button */
+        .analyse-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            background: linear-gradient(90deg, #0071e3, #5856d6);
+            color: white;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 50px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            text-decoration: none;
+            transition: all 0.3s;
+            margin-left: 1rem;
+        }
+
+        .analyse-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 113, 227, 0.3);
+        }
+
+        .patent-header-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .patent-header-left {
+            display: flex;
+            align-items: center;
+        }
+
         .patent-date {
             color: #6e6e73;
             font-size: 1rem;
@@ -227,7 +275,7 @@
             <a href="{% url 'dashboard' %}" class="logo">Patent Risk Radar</a>
             <nav class="nav-links">
                 <a href="{% url 'dashboard' %}" class="nav-link">Dashboard</a>
-                <a href="{% url 'search_patents' %}" class="nav-link">Search</a>
+                <a href="{% url 'dashboard' %}?tab=search" class="nav-link">Search</a>
                 <a href="{% url 'patent_list' %}" class="nav-link">Patents</a>
                 <a href="{% url 'logout' %}" class="nav-link">Logout</a>
             </nav>
@@ -237,7 +285,16 @@
 
         <div class="patent-card">
             <div class="patent-header">
-                <div class="patent-number">{{ patent.publication_number }}</div>
+                <div class="patent-header-row">
+                    <div class="patent-header-left">
+                        <div class="patent-number">{{ patent.publication_number }}</div>
+                        {% if is_analysed %}
+                            <span class="analysis-badge">✓ Analysed</span>
+                        {% else %}
+                            <a href="{% url 'analyse_patent' patent.patent_id %}" class="analyse-btn">Analyse</a>
+                        {% endif %}
+                    </div>
+                </div>
                 <div class="patent-date">
                     {% if patent.publication_date %}
                         Published: {{ patent.publication_date|date:"F d, Y" }}
