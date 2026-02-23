@@ -52,15 +52,15 @@ def analyse_patent_with_openrouter(patent, prompt_template):
     
     # Request body - using a general model that works well for analysis
     data = {
-        "model": "google/gemini-2.0-flash-001",  # Fast and capable model
+        "model": "deepseek/deepseek-v3.2",  # qwen/qwen3.5-397b-a17b
         "messages": [
             {
                 "role": "user",
                 "content": prompt
             }
         ],
-        "temperature": 0.7,
-        "max_tokens": 4096,
+        "temperature": 1,
+        # "max_tokens": 4096,
     }
     
     try:

@@ -20,6 +20,7 @@
             max-width: 1400px;
             margin: 0 auto;
             display: flex;
+            flex-direction: column;
             gap: 2rem;
         }
 
@@ -382,67 +383,33 @@
 </head>
 <body>
     <div class="container">
-        <!-- Sidebar -->
-        <aside class="sidebar">
-            <div class="sidebar-section">
-                <h3 class="sidebar-title">📁 Saved Searches</h3>
-                {% if saved_searches %}
-                    <div class="saved-search-list">
-                        {% for saved in saved_searches %}
-                            <div class="saved-search-item">
-                                <a href="{% url 'search_patents' %}?{% if saved.query %}q={{ saved.query }}&{% endif %}{% if saved.inventor %}inventor={{ saved.inventor }}&{% endif %}{% if saved.applicant %}applicant={{ saved.applicant }}&{% endif %}{% if saved.assignee %}assignee={{ saved.assignee }}{% endif %}" class="saved-search-link" title="{{ saved.query|default:'' }} {{ saved.inventor|default:'' }} {{ saved.applicant|default:'' }} {{ saved.assignee|default:'' }}">
-                                    {% if saved.name %}
-                                        {{ saved.name }}
-                                    {% elif saved.query %}
-                                        {{ saved.query|truncatechars:20 }}
-                                    {% elif saved.inventor %}
-                                        Inventor: {{ saved.inventor|truncatechars:15 }}
-                                    {% elif saved.applicant %}
-                                        Applicant: {{ saved.applicant|truncatechars:15 }}
-                                    {% elif saved.assignee %}
-                                        Assignee: {{ saved.assignee|truncatechars:15 }}
-                                    {% else %}
-                                        Search {{ forloop.counter }}
-                                    {% endif %}
-                                </a>
-                                <form method="post" action="{% url 'delete_saved_search' saved.id %}" style="display: inline;">
-                                    {% csrf_token %}
-                                    <button type="submit" class="saved-search-delete" title="Delete">✕</button>
-                                </form>
-                            </div>
-                        {% endfor %}
-                    </div>
-                {% else %}
-                    <p class="no-saved-searches">No saved searches yet. Run a search and save it!</p>
-                {% endif %}
+        <!-- Header at container level -->
+        <div class="header" style="width: 100%;">
+            <div class="header-left">
+                <a href="{% url 'landing' %}" class="logo">Patent Risk Radar</a>
+                <nav class="nav-links">
+                    <a href="{% url 'dashboard' %}" class="nav-link">Dashboard</a>
+                    <a href="{% url 'search_patents' %}" class="nav-link active">Search</a>
+                    <a href="{% url 'patent_list' %}" class="nav-link">Patents</a>
+                </nav>
             </div>
-        </aside>
-
-        <!-- Main Content -->
-        <main class="main-content">
-            <div class="container-inner">
-                <div class="header">
-                    <div class="header-left">
-                        <a href="{% url 'landing' %}" class="logo">Patent Risk Radar</a>
-                        <nav class="nav-links">
-                            <a href="{% url 'dashboard' %}" class="nav-link">Dashboard</a>
-                            <a href="{% url 'search_patents' %}" class="nav-link active">Search</a>
-                            <a href="{% url 'patent_list' %}" class="nav-link">Patents</a>
-                        </nav>
-                    </div>
-                    <div class="user-info">
-                        <div class="user-avatar">{{ user.username|first|upper }}</div>
-                        <div class="user-details">
-                            <h3>{{ user.username }}</h3>
-                            <p>{{ user.email }}</p>
-                        </div>
-                        <form method="post" action="{% url 'logout' %}" style="display: inline;">
-                            {% csrf_token %}
-                            <button type="submit" class="logout-btn">Log Out</button>
-                        </form>
-                    </div>
+            <div class="user-info">
+                <div class="user-avatar">{{ user.username|first|upper }}</div>
+                <div class="user-details">
+                    <h3>{{ user.username }}</h3>
+                    <p>{{ user.email }}</p>
                 </div>
+                <form method="post" action="{% url 'logout' %}" style="display: inline;">
+                    {% csrf_token %}
+                    <button type="submit" class="logout-btn">Log Out</button>
+                </form>
+            </div>
+        </div>
 
+        <!-- Sidebar and Main Content at same level (below header) -->
+        <div style="display: flex; gap: 2rem; flex: 1; width: 100%;">
+            <!-- Main Content -->
+            <main class="main-content" style="flex: 1;">
                 <div class="page-header">
                     <h1>Search AI Patents</h1>
                     <p>Search for AI-related patents and assess their dual-use and civic risks. Filter by inventor, applicant, owner, and more.</p>
@@ -488,8 +455,44 @@
                         <p>Tip: Use any combination of fields to narrow your search. Leave fields empty to see all patents.</p>
                     </div>
                 </div>
-            </div>
-        </main>
+            </main>
+
+            <!-- Sidebar (below header, at same level as main content) -->
+            <aside class="sidebar" style="width: 280px; flex-shrink: 0;">
+                <div class="sidebar-section">
+                    <h3 class="sidebar-title">📁 Saved Searches</h3>
+                    {% if saved_searches %}
+                        <div class="saved-search-list">
+                            {% for saved in saved_searches %}
+                                <div class="saved-search-item">
+                                    <a href="{% url 'search_patents' %}?{% if saved.query %}q={{ saved.query }}{% if saved.inventor or saved.applicant or saved.assignee %}&{% endif %}{% endif %}{% if saved.inventor %}inventor={{ saved.inventor }}{% if saved.applicant or saved.assignee %}&{% endif %}{% endif %}{% if saved.applicant %}applicant={{ saved.applicant }}{% if saved.assignee %}&{% endif %}{% endif %}{% if saved.assignee %}assignee={{ saved.assignee }}{% endif %}" class="saved-search-link" title="{{ saved.query|default:'' }} {{ saved.inventor|default:'' }} {{ saved.applicant|default:'' }} {{ saved.assignee|default:'' }}">
+                                        {% if saved.name %}
+                                            {{ saved.name }}
+                                        {% elif saved.query %}
+                                            {{ saved.query|truncatechars:20 }}
+                                        {% elif saved.inventor %}
+                                            Inventor: {{ saved.inventor|truncatechars:15 }}
+                                        {% elif saved.applicant %}
+                                            Applicant: {{ saved.applicant|truncatechars:15 }}
+                                        {% elif saved.assignee %}
+                                            Assignee: {{ saved.assignee|truncatechars:15 }}
+                                        {% else %}
+                                            Search {{ forloop.counter }}
+                                        {% endif %}
+                                    </a>
+                                    <form method="post" action="{% url 'delete_saved_search' saved.id %}" style="display: inline;">
+                                        {% csrf_token %}
+                                        <button type="submit" class="saved-search-delete" title="Delete">✕</button>
+                                    </form>
+                                </div>
+                            {% endfor %}
+                        </div>
+                    {% else %}
+                        <p class="no-saved-searches">No saved searches yet. Run a search and save it!</p>
+                    {% endif %}
+                </div>
+            </aside>
+        </div>
     </div>
 
     <script>

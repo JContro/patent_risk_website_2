@@ -19,4 +19,5 @@ urlpatterns = [
     path('search/', views.search_patents, name='search_patents'),
     path('search/save/', views.save_search, name='save_search'),
     path('search/delete/<int:search_id>/', views.delete_saved_search, name='delete_saved_search'),
+    path('search/analyse-all/', views.analyse_all_patents, name='analyse_all_patents'),
 ]

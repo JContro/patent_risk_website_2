@@ -201,12 +201,30 @@ def patent_list(request):
         # If page is out of range, deliver last page
         patents = paginator.page(paginator.num_pages)
     
+    # Get saved searches for the user if authenticated
+    saved_searches = []
+    current_saved_search = None
+    if request.user.is_authenticated:
+        saved_searches = SavedSearch.objects.filter(user=request.user)[:10]
+        # Check if current search matches any saved search
+        query = request.GET.get('q', '')
+        inventor = request.GET.get('inventor', '')
+        applicant = request.GET.get('applicant', '')
+        assignee = request.GET.get('assignee', '')
+        for saved in saved_searches:
+            if (saved.query == query and saved.inventor == inventor and
+                saved.applicant == applicant and saved.assignee == assignee):
+                current_saved_search = saved
+                break
+    
     return render(request, 'accounts/patent_list.html', {
         'patents': patents,
         'search_query': request.GET.get('q', ''),
         'search_inventor': request.GET.get('inventor', ''),
         'search_applicant': request.GET.get('applicant', ''),
         'search_assignee': request.GET.get('assignee', ''),
+        'saved_searches': saved_searches,
+        'current_saved_search': current_saved_search,
     })
 
 
@@ -355,8 +373,15 @@ def search_patents(request):
     
     # Get saved searches for the user if authenticated
     saved_searches = []
+    current_saved_search = None
     if request.user.is_authenticated:
         saved_searches = SavedSearch.objects.filter(user=request.user)[:10]
+        # Check if current search matches any saved search
+        for saved in saved_searches:
+            if (saved.query == query and saved.inventor == inventor and
+                saved.applicant == applicant and saved.assignee == assignee):
+                current_saved_search = saved
+                break
     
     if not has_search:
         # Show search form (empty)
@@ -366,6 +391,7 @@ def search_patents(request):
             'search_applicant': '',
             'search_assignee': '',
             'saved_searches': saved_searches,
+            'current_saved_search': current_saved_search,
         })
     
     # Start with all patents
@@ -422,6 +448,7 @@ def search_patents(request):
         'search_applicant': applicant,
         'search_assignee': assignee,
         'saved_searches': saved_searches,
+        'current_saved_search': current_saved_search,
     })
 
 
@@ -481,4 +508,94 @@ def delete_saved_search(request, search_id):
     saved_search = get_object_or_404(SavedSearch, id=search_id, user=request.user)
     saved_search.delete()
     messages.success(request, 'Saved search deleted.')
+    return redirect('search_patents')
+
+
+@login_required
+def analyse_all_patents(request):
+    """
+    Analyze all patents from a saved search.
+    Takes a saved_search_id parameter and analyses all patents matching that search.
+    """
+    if request.method == 'POST':
+        saved_search_id = request.POST.get('saved_search_id')
+        saved_search = get_object_or_404(SavedSearch, id=saved_search_id, user=request.user)
+        
+        # Re-run the search to get matching patents
+        patents = Patent.objects.all()
+        
+        query = saved_search.query
+        inventor = saved_search.inventor
+        applicant = saved_search.applicant
+        assignee = saved_search.assignee
+        
+        if query:
+            patents = patents.filter(
+                Q(title__icontains=query) |
+                Q(abstract__icontains=query) |
+                Q(publication_number__icontains=query)
+            )
+        
+        if inventor:
+            patents = patents.filter(
+                Q(inventors__icontains=inventor)
+            ).distinct()
+        
+        if applicant:
+            patents = patents.filter(
+                Q(applicants__icontains=applicant)
+            ).distinct()
+        
+        if assignee:
+            patents = patents.filter(
+                entities__name__icontains=assignee,
+                entities__entity_type='assignee'
+            ).distinct()
+        
+        # Get patents that haven't been analyzed yet
+        patents_to_analyze = patents.filter(analysis__isnull=True)
+        
+        # Get the prompt template from settings
+        prompt_template = getattr(settings, 'PATENT_ANALYSIS_PROMPT', '')
+        
+        # Get API key
+        api_key = getattr(settings, 'OPENROUTER_API_KEY', '')
+        
+        if not prompt_template or not api_key:
+            messages.error(request, 'Analysis not configured. Please contact the administrator.')
+            return redirect('patent_list')
+        
+        analyzed_count = 0
+        for patent in patents_to_analyze:
+            try:
+                raw_response = analyse_patent_with_openrouter(patent, prompt_template)
+                Analysis.objects.update_or_create(
+                    patent=patent,
+                    defaults={'raw_response': raw_response}
+                )
+                analyzed_count += 1
+            except Exception as e:
+                print(f"Error analyzing patent {patent.patent_id}: {e}")
+        
+        if analyzed_count > 0:
+            messages.success(request, f'Successfully analyzed {analyzed_count} patents from your saved search.')
+        else:
+            messages.info(request, 'No new patents to analyze. All patents in this search have already been analyzed.')
+        
+        # Redirect back to the saved search results
+        params = {}
+        if saved_search.query:
+            params['q'] = saved_search.query
+        if saved_search.inventor:
+            params['inventor'] = saved_search.inventor
+        if saved_search.applicant:
+            params['applicant'] = saved_search.applicant
+        if saved_search.assignee:
+            params['assignee'] = saved_search.assignee
+        
+        url = reverse('patent_list')
+        if params:
+            url += '?' + urlencode(params)
+        return redirect(url)
+    
     return redirect('search_patents')
