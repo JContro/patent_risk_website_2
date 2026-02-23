@@ -303,6 +303,11 @@
             margin-top: 0.25rem;
         }
         
+        /* Make search-field a positioning context for autocomplete */
+        .search-field {
+            position: relative;
+        }
+        
         .autocomplete-suggestions.active {
             display: block;
         }
@@ -320,6 +325,67 @@
         
         .autocomplete-suggestion:hover {
             background: rgba(0, 113, 227, 0.1);
+        }
+
+        /* Tag Input Container */
+        .tag-input-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            padding: 0.5rem;
+            border: 2px solid rgba(0, 113, 227, 0.2);
+            border-radius: 12px;
+            background: white;
+            min-height: 48px;
+            align-items: center;
+        }
+        
+        .tag-input-container:focus-within {
+            border-color: #0071e3;
+            box-shadow: 0 0 0 4px rgba(0, 113, 227, 0.1);
+        }
+        
+        .tag-input-container input {
+            border: none;
+            outline: none;
+            flex: 1;
+            min-width: 150px;
+            padding: 0.25rem;
+            font-size: 1rem;
+        }
+        
+        .tags-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+        }
+        
+        .tag {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.4rem 0.75rem;
+            background: linear-gradient(90deg, #0071e3, #5856d6);
+            color: white;
+            border-radius: 20px;
+            font-size: 0.9rem;
+            font-weight: 500;
+        }
+        
+        .tag-remove {
+            background: none;
+            border: none;
+            color: white;
+            cursor: pointer;
+            font-size: 1rem;
+            line-height: 1;
+            padding: 0;
+            opacity: 0.8;
+            transition: opacity 0.2s;
+        }
+        
+        .tag-remove:hover {
+            opacity: 1;
         }
 
         /* Search Button */
@@ -424,28 +490,40 @@
                                    value="{{ search_query|default:'' }}">
                         </div>
                         
-                        <!-- Multi-value Inventor Search -->
+                        <!-- Multi-value Inventor Search with Tags -->
                         <div class="search-field">
-                            <label for="inventor-search">Inventors (comma-separated)</label>
-                            <input type="text" id="inventor-search" name="inventor"
-                                   placeholder="e.g. John Smith, Jane Doe, Acme Corp..."
-                                   value="{{ search_inventor|default:'' }}">
+                            <label>Inventors</label>
+                            <div class="tag-input-container" id="inventor-container">
+                                <div class="tags-list" id="inventor-tags"></div>
+                                <input type="text" id="inventor-search"
+                                       placeholder="Type to search inventors..." autocomplete="off">
+                                <input type="hidden" name="inventor" id="inventor-hidden" value="{{ search_inventor|default:'' }}">
+                            </div>
+                            <div class="autocomplete-suggestions" id="inventor-suggestions"></div>
                         </div>
                         
-                        <!-- Multi-value Applicant Search -->
+                        <!-- Multi-value Applicant Search with Tags -->
                         <div class="search-field">
-                            <label for="applicant-search">Applicants (comma-separated)</label>
-                            <input type="text" id="applicant-search" name="applicant"
-                                   placeholder="e.g. Google, Microsoft, IBM..."
-                                   value="{{ search_applicant|default:'' }}">
+                            <label>Applicants</label>
+                            <div class="tag-input-container" id="applicant-container">
+                                <div class="tags-list" id="applicant-tags"></div>
+                                <input type="text" id="applicant-search"
+                                       placeholder="Type to search applicants..." autocomplete="off">
+                                <input type="hidden" name="applicant" id="applicant-hidden" value="{{ search_applicant|default:'' }}">
+                            </div>
+                            <div class="autocomplete-suggestions" id="applicant-suggestions"></div>
                         </div>
                         
-                        <!-- Multi-value Owner (Assignee) Search -->
+                        <!-- Multi-value Owner (Assignee) Search with Tags -->
                         <div class="search-field">
-                            <label for="owner-search">Owners / Assignees (comma-separated)</label>
-                            <input type="text" id="owner-search" name="assignee"
-                                   placeholder="e.g. Google, Microsoft, Apple..."
-                                   value="{{ search_assignee|default:'' }}">
+                            <label>Owners / Assignees</label>
+                            <div class="tag-input-container" id="owner-container">
+                                <div class="tags-list" id="owner-tags"></div>
+                                <input type="text" id="owner-search"
+                                       placeholder="Type to search owners..." autocomplete="off">
+                                <input type="hidden" name="assignee" id="owner-hidden" value="{{ search_assignee|default:'' }}">
+                            </div>
+                            <div class="autocomplete-suggestions" id="owner-suggestions"></div>
                         </div>
                         
                         <!-- Date Range Search -->
@@ -510,23 +588,66 @@
     </div>
 
     <script>
-        // Autocomplete functionality
-        class Autocomplete {
-            constructor(inputElement, suggestionsElement, entityType) {
+        // Tag-based autocomplete functionality
+        class TagAutocomplete {
+            constructor(inputElement, suggestionsElement, tagsListElement, hiddenInput, entityType) {
                 this.input = inputElement;
                 this.suggestions = suggestionsElement;
+                this.tagsList = tagsListElement;
+                this.hiddenInput = hiddenInput;
                 this.entityType = entityType;
                 this.selectedIndex = -1;
                 this.items = [];
+                this.tags = this.loadTags();
                 
+                this.renderTags();
                 this.setupEventListeners();
+            }
+            
+            loadTags() {
+                // Load initial tags from hidden input value
+                const value = this.hiddenInput.value;
+                return value ? value.split(',').map(t => t.trim()).filter(t => t) : [];
+            }
+            
+            saveTags() {
+                this.hiddenInput.value = this.tags.join(', ');
+            }
+            
+            renderTags() {
+                this.tagsList.innerHTML = this.tags.map((tag, index) =>
+                    `<span class="tag">${tag}<button type="button" class="tag-remove" data-index="${index}">×</button></span>`
+                ).join('');
+                
+                // Add remove event listeners
+                this.tagsList.querySelectorAll('.tag-remove').forEach(btn => {
+                    btn.addEventListener('click', (e) => {
+                        const index = parseInt(e.target.dataset.index);
+                        this.removeTag(index);
+                    });
+                });
+            }
+            
+            addTag(tag) {
+                if (tag && !this.tags.includes(tag)) {
+                    this.tags.push(tag);
+                    this.saveTags();
+                    this.renderTags();
+                }
+                this.input.value = '';
+            }
+            
+            removeTag(index) {
+                this.tags.splice(index, 1);
+                this.saveTags();
+                this.renderTags();
             }
             
             setupEventListeners() {
                 this.input.addEventListener('input', () => this.handleInput());
                 this.input.addEventListener('keydown', (e) => this.handleKeydown(e));
                 document.addEventListener('click', (e) => {
-                    if (!this.input.contains(e.target) && !this.suggestions.contains(e.target)) {
+                    if (!this.input.parentElement.contains(e.target) && !this.suggestions.contains(e.target)) {
                         this.hideSuggestions();
                     }
                 });
@@ -548,11 +669,12 @@
                 try {
                     const response = await fetch(`/accounts/autocomplete/entities/?q=${encodeURIComponent(query)}&type=${this.entityType}`);
                     const data = await response.json();
-                    this.items = data;
+                    // Filter out already selected tags
+                    this.items = data.filter(item => !this.tags.includes(item));
                     this.selectedIndex = -1;
                     
-                    if (data.length > 0) {
-                        this.showSuggestions(data);
+                    if (this.items.length > 0) {
+                        this.showSuggestions(this.items);
                     } else {
                         this.hideSuggestions();
                     }
@@ -581,7 +703,7 @@
             }
             
             selectItem(item) {
-                this.input.value = item;
+                this.addTag(item);
                 this.hideSuggestions();
             }
             
@@ -596,11 +718,20 @@
                     e.preventDefault();
                     this.selectedIndex = Math.max(this.selectedIndex - 1, -1);
                     this.updateHighlight(items);
-                } else if (e.key === 'Enter' && this.selectedIndex >= 0) {
+                } else if (e.key === 'Enter') {
                     e.preventDefault();
-                    this.selectItem(items[this.selectedIndex].textContent);
+                    if (this.selectedIndex >= 0) {
+                        this.selectItem(items[this.selectedIndex].textContent);
+                    } else if (this.input.value.trim()) {
+                        // Allow adding custom text as a tag
+                        this.addTag(this.input.value.trim());
+                        this.hideSuggestions();
+                    }
                 } else if (e.key === 'Escape') {
                     this.hideSuggestions();
+                } else if (e.key === 'Backspace' && !this.input.value && this.tags.length > 0) {
+                    // Remove last tag on backspace
+                    this.removeTag(this.tags.length - 1);
                 }
             }
             
@@ -612,30 +743,47 @@
         }
 
         document.addEventListener('DOMContentLoaded', () => {
+            // Inventor tags
             const inventorInput = document.getElementById('inventor-search');
-            const applicantInput = document.getElementById('applicant-search');
-            const ownerInput = document.getElementById('owner-search');
-
+            const inventorSuggestions = document.getElementById('inventor-suggestions');
+            const inventorTags = document.getElementById('inventor-tags');
+            const inventorHidden = document.getElementById('inventor-hidden');
             if (inventorInput) {
-                new Autocomplete(
-                    inventorInput, 
-                    document.getElementById('inventor-suggestions'), 
+                new TagAutocomplete(
+                    inventorInput,
+                    inventorSuggestions,
+                    inventorTags,
+                    inventorHidden,
                     'inventor'
                 );
             }
             
+            // Applicant tags
+            const applicantInput = document.getElementById('applicant-search');
+            const applicantSuggestions = document.getElementById('applicant-suggestions');
+            const applicantTags = document.getElementById('applicant-tags');
+            const applicantHidden = document.getElementById('applicant-hidden');
             if (applicantInput) {
-                new Autocomplete(
-                    applicantInput, 
-                    document.getElementById('applicant-suggestions'), 
+                new TagAutocomplete(
+                    applicantInput,
+                    applicantSuggestions,
+                    applicantTags,
+                    applicantHidden,
                     'applicant'
                 );
             }
             
+            // Owner/Assignee tags
+            const ownerInput = document.getElementById('owner-search');
+            const ownerSuggestions = document.getElementById('owner-suggestions');
+            const ownerTags = document.getElementById('owner-tags');
+            const ownerHidden = document.getElementById('owner-hidden');
             if (ownerInput) {
-                new Autocomplete(
-                    ownerInput, 
-                    document.getElementById('owner-suggestions'), 
+                new TagAutocomplete(
+                    ownerInput,
+                    ownerSuggestions,
+                    ownerTags,
+                    ownerHidden,
                     'assignee'
                 );
             }
