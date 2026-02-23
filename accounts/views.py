@@ -22,6 +22,89 @@ from django.db.models import Q
 from django.conf import settings
 from .openrouter_service import analyse_patent_with_openrouter
 import json
+import re
+
+
+def _parse_json_response(raw_response):
+    """
+    Robustly parse JSON from API response, handling various edge cases.
+    Returns a normalized list of risk objects with consistent keys and types.
+    """
+    if not raw_response:
+        return None
+    
+    # Try direct JSON parse first
+    try:
+        data = json.loads(raw_response)
+    except json.JSONDecodeError:
+        # Try to extract JSON from response that might have extra text
+        json_match = re.search(r'\[.*\]', raw_response, re.DOTALL)
+        if json_match:
+            try:
+                data = json.loads(json_match.group(0))
+            except json.JSONDecodeError:
+                return None
+        else:
+            return None
+    
+    # Normalize to a list
+    if isinstance(data, dict):
+        # If the response is a dict with a 'risks' or 'results' key, use that
+        if 'risks' in data:
+            data = data['risks']
+        elif 'results' in data:
+            data = data['results']
+        elif 'items' in data:
+            data = data['items']
+        else:
+            # Single item dict - wrap in list
+            data = [data]
+    elif not isinstance(data, list):
+        return None
+    
+    # Normalize each risk item to have consistent keys
+    normalized_risks = []
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        
+        # Map common alternative key names to standard keys
+        snippet = (
+            item.get('snippet') or
+            item.get('text') or
+            item.get('quote') or
+            item.get('matched_text') or
+            item.get('content', '')
+        )
+        
+        risk = (
+            item.get('risk') or
+            item.get('risk_type') or
+            item.get('category') or
+            item.get('type', '')
+        )
+        
+        # Ensure confidence_score is a float between 0 and 1
+        confidence = item.get('confidence_score') or item.get('confidence') or item.get('score')
+        if confidence is not None:
+            try:
+                confidence = float(confidence)
+                # Clamp to valid range
+                confidence = max(0.0, min(1.0, confidence))
+            except (TypeError, ValueError):
+                confidence = 0.5  # Default if invalid
+        else:
+            confidence = 0.5
+        
+        # Only add if we have at least a snippet
+        if snippet:
+            normalized_risks.append({
+                'snippet': str(snippet),
+                'risk': str(risk),
+                'confidence_score': confidence
+            })
+    
+    return normalized_risks if normalized_risks else None
 
 
 def landing(request):
@@ -271,12 +354,7 @@ def analyse_patent(request, patent_id):
         # Parse the JSON response from the API
         parsed_risks = None
         if raw_response:
-            try:
-                # Try to parse the response as JSON
-                parsed_risks = json.loads(raw_response)
-            except json.JSONDecodeError:
-                # If parsing fails, keep it as raw text
-                parsed_risks = None
+            parsed_risks = _parse_json_response(raw_response)
         
         # Create or update the analysis entry with the raw response and parsed risks
         analysis, created = Analysis.objects.update_or_create(
@@ -583,13 +661,10 @@ def analyse_all_patents(request):
             try:
                 raw_response = analyse_patent_with_openrouter(patent, prompt_template)
                 
-                # Parse the JSON response from the API
+                # Parse the JSON response from the API using robust parser
                 parsed_risks = None
                 if raw_response:
-                    try:
-                        parsed_risks = json.loads(raw_response)
-                    except json.JSONDecodeError:
-                        parsed_risks = None
+                    parsed_risks = _parse_json_response(raw_response)
                 
                 Analysis.objects.update_or_create(
                     patent=patent,

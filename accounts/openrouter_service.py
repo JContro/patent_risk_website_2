@@ -59,7 +59,8 @@ def analyse_patent_with_openrouter(patent, prompt_template):
                 "content": prompt
             }
         ],
-        "temperature": 1,
+        "temperature": 0,  # Lower temperature for more consistent outputs
+        "response_format": {"type": "json_object"},  # Force JSON output mode
         # "max_tokens": 4096,
     }
     

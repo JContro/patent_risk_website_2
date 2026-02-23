@@ -114,17 +114,23 @@ OPENROUTER_API_KEY = os.environ.get('OPENROUTER_API_KEY', '')
 
 # Patent analysis prompt template
 # Use {risks_list} and {patent_claims} as placeholders
-PATENT_ANALYSIS_PROMPT = os.environ.get('PATENT_ANALYSIS_PROMPT', '''In the following text please extract (if you find any) snippets of text that present any one of these risks:
+PATENT_ANALYSIS_PROMPT = os.environ.get('PATENT_ANALYSIS_PROMPT', '''Analyze the following patent text and extract any risks related to EU AI Act concerns.
 
+Risks to check for:
 {risks_list}
 
-The text is:
+Patent text to analyze:
 {patent_claims}
 
-Please output the text in this format:
-[{"snippet": "example", "risk": "risk type (from the given risks)", "confidence score": (float between 0 and 1)}]
-
-if there is no risk detected output []''')
+INSTRUCTIONS:
+1. Output ONLY valid JSON - no additional text, explanations, or markdown formatting
+2. The response must be a JSON array of objects with exactly these keys:
+   - "snippet": The exact text from the patent that contains the risk (string)
+   - "risk": The exact risk category from the list above (string)
+   - "confidence_score": A float between 0 and 1 (number, not string)
+3. If no risks are found, output an empty array: []
+4. Do not include any keys other than "snippet", "risk", and "confidence_score"
+5. Do not add any commentary or explanation - output ONLY the JSON array''')
 
 # EU AI Act Risks List
 EU_AI_RISKS = [
