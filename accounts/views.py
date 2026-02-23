@@ -17,6 +17,8 @@ import uuid
 from .models import User, Patent, Entity, Analysis
 from .forms import RegistrationForm
 from django.db.models import Q
+from django.conf import settings
+from .openrouter_service import analyse_patent_with_openrouter
 import json
 
 
@@ -210,27 +212,53 @@ def patent_detail(request, patent_id):
     """
     patent = get_object_or_404(Patent, patent_id=patent_id)
     is_analysed = hasattr(patent, 'analysis')
+    analysis = getattr(patent, 'analysis', None)
     
     return render(request, 'accounts/patent_detail.html', {
         'patent': patent,
         'is_analysed': is_analysed,
+        'analysis': analysis,
     })
 
 
+@login_required
 def analyse_patent(request, patent_id):
     """
-    Create an analysis entry for a patent.
-    For now, this is a simple placeholder that marks the patent as analysed.
+    Create an analysis entry for a patent by sending it to OpenRouter API.
+    The raw response from OpenRouter is saved in the database.
     """
     patent = get_object_or_404(Patent, patent_id=patent_id)
     
-    # Check if already analysed
-    if not hasattr(patent, 'analysis'):
-        # Create a new analysis entry
-        Analysis.objects.create(patent=patent)
-        messages.success(request, f'Patent {patent.publication_number} has been analysed.')
-    else:
-        messages.info(request, f'Patent {patent.publication_number} is already analysed.')
+    # Get the prompt template from settings
+    prompt_template = getattr(settings, 'PATENT_ANALYSIS_PROMPT', '')
+    
+    if not prompt_template:
+        messages.error(request, 'Analysis prompt not configured. Please contact the administrator.')
+        return redirect('patent_detail', patent_id=patent_id)
+    
+    # Check if API key is configured
+    api_key = getattr(settings, 'OPENROUTER_API_KEY', '')
+    if not api_key:
+        messages.error(request, 'OpenRouter API key not configured. Please contact the administrator.')
+        return redirect('patent_detail', patent_id=patent_id)
+    
+    try:
+        # Call the OpenRouter API to analyze the patent
+        raw_response = analyse_patent_with_openrouter(patent, prompt_template)
+        
+        # Create or update the analysis entry with the raw response
+        analysis, created = Analysis.objects.update_or_create(
+            patent=patent,
+            defaults={'raw_response': raw_response}
+        )
+        
+        if created:
+            messages.success(request, f'Patent {patent.publication_number} has been analysed.')
+        else:
+            messages.success(request, f'Analysis for patent {patent.publication_number} has been updated.')
+            
+    except Exception as e:
+        messages.error(request, f'Error analyzing patent: {str(e)}')
     
     # Redirect back to the patent detail page
     return redirect('patent_detail', patent_id=patent_id)

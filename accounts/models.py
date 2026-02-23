@@ -147,14 +147,16 @@ class Entity(models.Model):
 class Analysis(models.Model):
     """
     Analysis model representing a patent analysis/classification.
-    For now, a simple entry marks the patent as "analysed".
-    Full implementation with classification details will come later.
+    Stores the raw response from OpenRouter API for each patent analysis.
     """
     # Primary key
     analysis_id = models.AutoField(primary_key=True)
     
     # Foreign key to Patent
     patent = models.OneToOneField(Patent, on_delete=models.CASCADE, related_name='analysis')
+    
+    # Raw response from OpenRouter API
+    raw_response = models.TextField(blank=True, null=True)
     
     # Timestamp
     created_at = models.DateTimeField(auto_now_add=True)

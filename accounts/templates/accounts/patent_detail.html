@@ -111,6 +111,94 @@
             margin-left: 1rem;
         }
 
+        /* Analysis Results */
+        .analysis-results {
+            background: linear-gradient(135deg, #fff5f5 0%, #fff0f0 100%);
+            border: 2px solid #ff3b30;
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-top: 1.5rem;
+        }
+
+        .analysis-results-title {
+            font-size: 1.2rem;
+            font-weight: 700;
+            color: #ff3b30;
+            margin-bottom: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .analysis-results-content {
+            background: white;
+            border-radius: 8px;
+            padding: 1rem;
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            font-size: 0.9rem;
+            line-height: 1.6;
+            color: #1d1d1f;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            max-height: 500px;
+            overflow-y: auto;
+            border: 1px solid rgba(0, 0, 0, 0.1);
+        }
+
+        .analysis-timestamp {
+            font-size: 0.85rem;
+            color: #6e6e73;
+            margin-top: 1rem;
+        }
+
+        /* Collapsible Sections */
+        .collapsible {
+            background: linear-gradient(135deg, #f8f9ff 0%, #eef2ff 100%);
+            border: 1px solid rgba(0, 113, 227, 0.2);
+            border-radius: 12px;
+            margin-bottom: 1rem;
+            overflow: hidden;
+        }
+
+        .collapsible-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 1rem 1.5rem;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+
+        .collapsible-header:hover {
+            background: rgba(0, 113, 227, 0.05);
+        }
+
+        .collapsible-title {
+            font-size: 1.1rem;
+            font-weight: 700;
+            color: #0071e3;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .collapsible-icon {
+            transition: transform 0.3s;
+        }
+
+        .collapsible-icon.collapsed {
+            transform: rotate(-90deg);
+        }
+
+        .collapsible-content {
+            padding: 0 1.5rem 1.5rem 1.5rem;
+            display: block;
+        }
+
+        .collapsible-content.collapsed {
+            display: none;
+        }
+
         /* Analyse Button */
         .analyse-btn {
             display: inline-flex;
@@ -290,6 +378,7 @@
                         <div class="patent-number">{{ patent.publication_number }}</div>
                         {% if is_analysed %}
                             <span class="analysis-badge">✓ Analysed</span>
+                            <a href="{% url 'analyse_patent' patent.patent_id %}" class="analyse-btn" style="margin-left: 0.5rem;">Re-analyse</a>
                         {% else %}
                             <a href="{% url 'analyse_patent' patent.patent_id %}" class="analyse-btn">Analyse</a>
                         {% endif %}
@@ -323,6 +412,33 @@
                     {% endif %}
                 </div>
             </div>
+
+            <!-- Analysis Results Section - Moved here after Abstract -->
+            {% if analysis and analysis.raw_response %}
+                <div class="section">
+                    <div class="collapsible">
+                        <div class="collapsible-header" onclick="toggleCollapsible(this)">
+                            <div class="collapsible-title">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                                </svg>
+                                EU AI Act Risk Analysis
+                            </div>
+                            <svg class="collapsible-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="6 9 12 15 18 9"></polyline>
+                            </svg>
+                        </div>
+                        <div class="collapsible-content">
+                            <div class="analysis-results">
+                                <div class="analysis-results-content">{{ analysis.raw_response }}</div>
+                                <div class="analysis-timestamp">
+                                    Analysed on: {{ analysis.created_at|date:"F d, Y H:i" }}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            {% endif %}
 
             <!-- Classifications Section -->
             {% if patent.classifications_cpc_main or patent.classifications_ipcr or patent.classifications_cpc_further %}
@@ -400,23 +516,41 @@
                 </div>
             {% endif %}
 
-            <!-- Claims Section -->
+            <!-- Claims Section - Collapsible -->
             {% if patent.claims %}
                 <div class="section">
-                    <h2 class="section-title">Claims</h2>
-                    <div class="claims-list">
-                        {% for claim in patent.claims %}
-                            <div class="claim-item">
-                                <div class="claim-number">Claim {{ forloop.counter }}</div>
-                                <div class="section-content">
-                                    {% if claim.claim_text %}
-                                        {{ claim.claim_text }}
-                                    {% else %}
-                                        <span class="empty-value">Claim text not available</span>
-                                    {% endif %}
-                                </div>
+                    <div class="collapsible">
+                        <div class="collapsible-header" onclick="toggleCollapsible(this)">
+                            <div class="collapsible-title">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                                    <polyline points="14 2 14 8 20 8"></polyline>
+                                    <line x1="16" y1="13" x2="8" y2="13"></line>
+                                    <line x1="16" y1="17" x2="8" y2="17"></line>
+                                    <polyline points="10 9 9 9 8 9"></polyline>
+                                </svg>
+                                Claims ({{ patent.claims|length }})
                             </div>
-                        {% endfor %}
+                            <svg class="collapsible-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="6 9 12 15 18 9"></polyline>
+                            </svg>
+                        </div>
+                        <div class="collapsible-content">
+                            <div class="claims-list">
+                                {% for claim in patent.claims %}
+                                    <div class="claim-item">
+                                        <div class="claim-number">Claim {{ forloop.counter }}</div>
+                                        <div class="section-content">
+                                            {% if claim.claim_text %}
+                                                {{ claim.claim_text }}
+                                            {% else %}
+                                                <span class="empty-value">Claim text not available</span>
+                                            {% endif %}
+                                        </div>
+                                    </div>
+                                {% endfor %}
+                            </div>
+                        </div>
                     </div>
                 </div>
             {% endif %}
@@ -506,7 +640,23 @@
                     {% endif %}
                 </div>
             </div>
+
         </div>
     </div>
+
+    <script>
+        function toggleCollapsible(header) {
+            const content = header.nextElementSibling;
+            const icon = header.querySelector('.collapsible-icon');
+            
+            if (content.classList.contains('collapsed')) {
+                content.classList.remove('collapsed');
+                icon.classList.remove('collapsed');
+            } else {
+                content.classList.add('collapsed');
+                icon.classList.add('collapsed');
+            }
+        }
+    </script>
 </body>
 </html>
