@@ -31,6 +31,12 @@
             border-bottom: 1px solid rgba(0, 113, 227, 0.2);
         }
 
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 2rem;
+        }
+
         .logo {
             font-size: 2.2rem;
             font-weight: 800;
@@ -39,6 +45,37 @@
             background-clip: text;
             color: transparent;
             letter-spacing: -0.03em;
+            text-decoration: none;
+        }
+
+        .logo:hover {
+            opacity: 0.9;
+        }
+
+        /* Navigation */
+        .nav-links {
+            display: flex;
+            gap: 1.5rem;
+        }
+
+        .nav-link {
+            color: #6e6e73;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 1rem;
+            padding: 0.5rem 1rem;
+            border-radius: 20px;
+            transition: all 0.3s;
+        }
+
+        .nav-link:hover {
+            color: #0071e3;
+            background: rgba(0, 113, 227, 0.1);
+        }
+
+        .nav-link.active {
+            color: #0071e3;
+            background: rgba(0, 113, 227, 0.15);
         }
 
         .user-info {
@@ -315,6 +352,16 @@
                 gap: 1.5rem;
                 align-items: flex-start;
             }
+            .header-left {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 1rem;
+                width: 100%;
+            }
+            .nav-links {
+                width: 100%;
+                justify-content: flex-start;
+            }
             .tabs {
                 flex-direction: column;
                 border-radius: 24px;
@@ -334,7 +381,14 @@
 <body>
     <div class="container">
         <div class="header">
-            <div class="logo">Patent Risk Radar</div>
+            <div class="header-left">
+                <a href="{% url 'landing' %}" class="logo">Patent Risk Radar</a>
+                <nav class="nav-links">
+                    <a href="{% url 'dashboard' %}" class="nav-link active">Dashboard</a>
+                    <a href="{% url 'search_patents' %}" class="nav-link">Search</a>
+                    <a href="{% url 'patent_list' %}" class="nav-link">Patents</a>
+                </nav>
+            </div>
             <div class="user-info">
                 <div class="user-avatar">{{ user.username|first|upper }}</div>
                 <div class="user-details">
@@ -348,11 +402,6 @@
             </div>
         </div>
 
-        <div class="tabs">
-            <button class="tab active" data-tab="dashboard">Dashboard</button>
-            <button class="tab" data-tab="search">Search</button>
-        </div>
-
         <div id="dashboard" class="tab-content active">
             <h2>Dashboard</h2>
             <p>Welcome to your Patent Risk Radar dashboard. Here you will soon see an overview of AI patent risks, recent alerts, and personalized insights.</p>
@@ -362,223 +411,11 @@
             </div>
         </div>
 
-        <div id="search" class="tab-content">
-            <h2>Search AI Patents</h2>
-            <p>Search for AI‑related patents and assess their dual‑use and civic risks. Filter by inventor, applicant, owner, and more.</p>
-            
-            <form action="/accounts/search/" method="get" class="search-form">
-                <!-- General Search -->
-                <div class="search-field">
-                    <label for="general-search">General Search</label>
-                    <input type="text" id="general-search" name="q" placeholder="Search by title, abstract, or patent number..."
-                           value="{{ search_query|default:'' }}">
-                </div>
-                
-                <!-- Inventor Search with Autocomplete -->
-                <div class="search-field autocomplete-wrapper">
-                    <label for="inventor-search">Inventor</label>
-                    <input type="text" id="inventor-search" name="inventor" placeholder="Start typing inventor name..."
-                           value="{{ search_inventor|default:'' }}" autocomplete="off">
-                    <div class="autocomplete-suggestions" id="inventor-suggestions"></div>
-                </div>
-                
-                <!-- Applicant Search with Autocomplete -->
-                <div class="search-field autocomplete-wrapper">
-                    <label for="applicant-search">Applicant</label>
-                    <input type="text" id="applicant-search" name="applicant" placeholder="Start typing applicant name..."
-                           value="{{ search_applicant|default:'' }}" autocomplete="off">
-                    <div class="autocomplete-suggestions" id="applicant-suggestions"></div>
-                </div>
-                
-                <!-- Owner (Assignee) Search with Autocomplete -->
-                <div class="search-field autocomplete-wrapper">
-                    <label for="owner-search">Owner / Assignee</label>
-                    <input type="text" id="owner-search" name="assignee" placeholder="Start typing owner name..."
-                           value="{{ search_assignee|default:'' }}" autocomplete="off">
-                    <div class="autocomplete-suggestions" id="owner-suggestions"></div>
-                </div>
-                
-                <button type="submit" class="search-button">Search Patents</button>
-            </form>
-            
-            <div class="search-hint">
-                <p>Tip: Use any combination of fields to narrow your search. Leave fields empty to see all patents.</p>
-            </div>
-        </div>
-
         <footer>
             <p>© 2026 Patent Risk Radar. All rights reserved.</p>
             <p>Built with transparency and responsibility in mind.</p>
         </footer>
     </div>
 
-    <script>
-        // Tab switching
-        const tabs = document.querySelectorAll('.tab');
-        const contents = document.querySelectorAll('.tab-content');
-
-        tabs.forEach(tab => {
-            tab.addEventListener('click', () => {
-                const target = tab.getAttribute('data-tab');
-                
-                // Update tabs
-                tabs.forEach(t => t.classList.remove('active'));
-                tab.classList.add('active');
-                
-                // Update contents
-                contents.forEach(c => {
-                    c.classList.remove('active');
-                    if (c.id === target) {
-                        c.classList.add('active');
-                    }
-                });
-            });
-        });
-        
-        // Autocomplete functionality
-        class Autocomplete {
-            constructor(inputElement, suggestionsElement, entityType) {
-                this.input = inputElement;
-                this.suggestions = suggestionsElement;
-                this.entityType = entityType;
-                this.selectedIndex = -1;
-                this.items = [];
-                
-                this.setupEventListeners();
-            }
-            
-            setupEventListeners() {
-                // Input event
-                this.input.addEventListener('input', () => this.handleInput());
-                
-                // Keyboard navigation
-                this.input.addEventListener('keydown', (e) => this.handleKeydown(e));
-                
-                // Click outside to close
-                document.addEventListener('click', (e) => {
-                    if (!this.input.contains(e.target) && !this.suggestions.contains(e.target)) {
-                        this.hideSuggestions();
-                    }
-                });
-                
-                // Focus to show existing suggestions if input has value
-                this.input.addEventListener('focus', () => {
-                    if (this.input.value.length >= 2) {
-                        this.handleInput();
-                    }
-                });
-            }
-            
-            async handleInput() {
-                const query = this.input.value.trim();
-                
-                if (query.length < 2) {
-                    this.hideSuggestions();
-                    return;
-                }
-                
-                try {
-                    const response = await fetch(`/accounts/autocomplete/entities/?q=${encodeURIComponent(query)}&type=${this.entityType}`);
-                    const data = await response.json();
-                    this.items = data;
-                    this.selectedIndex = -1;
-                    
-                    if (data.length > 0) {
-                        this.showSuggestions(data);
-                    } else {
-                        this.hideSuggestions();
-                    }
-                } catch (error) {
-                    console.error('Autocomplete error:', error);
-                    this.hideSuggestions();
-                }
-            }
-            
-            showSuggestions(items) {
-                this.suggestions.innerHTML = items.map((item, index) =>
-                    `<div class="autocomplete-suggestion" data-index="${index}">${item}</div>`
-                ).join('');
-                
-                this.suggestions.classList.add('active');
-                
-                // Add click listeners to suggestions
-                this.suggestions.querySelectorAll('.autocomplete-suggestion').forEach(el => {
-                    el.addEventListener('click', () => {
-                        const index = parseInt(el.dataset.index);
-                        this.selectItem(index);
-                    });
-                });
-            }
-            
-            hideSuggestions() {
-                this.suggestions.classList.remove('active');
-                this.selectedIndex = -1;
-            }
-            
-            selectItem(index) {
-                if (index >= 0 && index < this.items.length) {
-                    this.input.value = this.items[index];
-                    this.hideSuggestions();
-                    this.input.focus();
-                }
-            }
-            
-            handleKeydown(e) {
-                const items = this.suggestions.querySelectorAll('.autocomplete-suggestion');
-                
-                switch(e.key) {
-                    case 'ArrowDown':
-                        e.preventDefault();
-                        this.selectedIndex = Math.min(this.selectedIndex + 1, items.length - 1);
-                        this.updateHighlight(items);
-                        break;
-                    case 'ArrowUp':
-                        e.preventDefault();
-                        this.selectedIndex = Math.max(this.selectedIndex - 1, 0);
-                        this.updateHighlight(items);
-                        break;
-                    case 'Enter':
-                        e.preventDefault();
-                        if (this.selectedIndex >= 0) {
-                            this.selectItem(this.selectedIndex);
-                        }
-                        break;
-                    case 'Escape':
-                        this.hideSuggestions();
-                        break;
-                }
-            }
-            
-            updateHighlight(items) {
-                items.forEach((el, index) => {
-                    if (index === this.selectedIndex) {
-                        el.classList.add('highlighted');
-                        el.scrollIntoView({ block: 'nearest' });
-                    } else {
-                        el.classList.remove('highlighted');
-                    }
-                });
-            }
-        }
-        
-        // Initialize autocomplete for each field
-        document.addEventListener('DOMContentLoaded', () => {
-            const inventorInput = document.getElementById('inventor-search');
-            const applicantInput = document.getElementById('applicant-search');
-            const ownerInput = document.getElementById('owner-search');
-            
-            if (inventorInput && document.getElementById('inventor-suggestions')) {
-                new Autocomplete(inventorInput, document.getElementById('inventor-suggestions'), 'inventor');
-            }
-            
-            if (applicantInput && document.getElementById('applicant-suggestions')) {
-                new Autocomplete(applicantInput, document.getElementById('applicant-suggestions'), 'applicant');
-            }
-            
-            if (ownerInput && document.getElementById('owner-suggestions')) {
-                new Autocomplete(ownerInput, document.getElementById('owner-suggestions'), 'assignee');
-            }
-        });
-    </script>
 </body>
 </html>

@@ -310,12 +310,15 @@
 <body>
     <div class="container">
         <header class="header">
-            <a href="{% url 'dashboard' %}" class="logo">Patent Risk Radar</a>
+            <a href="{% url 'landing' %}" class="logo">Patent Risk Radar</a>
             <nav class="nav-links">
                 <a href="{% url 'dashboard' %}" class="nav-link">Dashboard</a>
-                <a href="{% url 'dashboard' %}?tab=search" class="nav-link">Search</a>
+                <a href="{% url 'search_patents' %}" class="nav-link">Search</a>
                 <a href="{% url 'patent_list' %}" class="nav-link">Patents</a>
-                <a href="{% url 'logout' %}" class="nav-link">Logout</a>
+                <form method="post" action="{% url 'logout' %}" style="display: inline;">
+                    {% csrf_token %}
+                    <button type="submit" class="nav-link" style="background: none; border: none; cursor: pointer;">Logout</button>
+                </form>
             </nav>
         </header>
 

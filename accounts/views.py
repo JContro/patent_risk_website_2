@@ -23,7 +23,9 @@ import json
 
 
 def landing(request):
-    """Landing page with login/register buttons."""
+    """Landing page - shows login/register for unauthenticated users, redirects to dashboard for authenticated."""
+    if request.user.is_authenticated:
+        return redirect('dashboard')
     return render(request, 'accounts/landing.html')
 
 
@@ -339,11 +341,24 @@ def autocomplete_entities(request):
 def search_patents(request):
     """
     Search patents by various fields including inventor, applicant, and assignee.
+    Shows search form if no query parameters, otherwise shows results.
     """
     query = request.GET.get('q', '')
     inventor = request.GET.get('inventor', '')
     applicant = request.GET.get('applicant', '')
     assignee = request.GET.get('assignee', '')  # Owner
+    
+    # Check if any search parameters are provided
+    has_search = query or inventor or applicant or assignee
+    
+    if not has_search:
+        # Show search form (empty)
+        return render(request, 'accounts/search.html', {
+            'search_query': '',
+            'search_inventor': '',
+            'search_applicant': '',
+            'search_assignee': '',
+        })
     
     # Start with all patents
     patents = Patent.objects.all()
