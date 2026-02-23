@@ -423,7 +423,7 @@
             <main class="main-content" style="flex: 1;">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem;">
                     <h1 class="page-title" style="margin-bottom: 0;">
-                        {% if search_query or search_inventor or search_applicant or search_assignee %}
+                        {% if search_query or search_inventor or search_applicant or search_assignee or date_from or date_to %}
                             Search Results
                         {% else %}
                             Patents
@@ -431,7 +431,7 @@
                     </h1>
                     
                     <!-- Save Search / Analyse All Buttons -->
-                    {% if search_query or search_inventor or search_applicant or search_assignee %}
+                    {% if search_query or search_inventor or search_applicant or search_assignee or date_from or date_to %}
                         <div style="display: flex; gap: 0.75rem;">
                             {% if current_saved_search %}
                                 <!-- Analyse All button for saved searches -->
@@ -450,6 +450,8 @@
                                     <input type="hidden" name="inventor" value="{{ search_inventor }}">
                                     <input type="hidden" name="applicant" value="{{ search_applicant }}">
                                     <input type="hidden" name="assignee" value="{{ search_assignee }}">
+                                    <input type="hidden" name="date_from" value="{{ date_from }}">
+                                    <input type="hidden" name="date_to" value="{{ date_to }}">
                                     <button type="submit" style="background: linear-gradient(90deg, #0071e3, #5856d6); color: white; border: none; padding: 0.7rem 1.5rem; border-radius: 50px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 0.5rem;">
                                         💾 Save Search
                                     </button>
@@ -460,7 +462,7 @@
                 </div>
 
             <!-- Display current search query -->
-            {% if search_query or search_inventor or search_applicant or search_assignee %}
+            {% if search_query or search_inventor or search_applicant or search_assignee or date_from or date_to %}
                 <div class="search-info">
                     <p>Showing results for:</p>
                     <div class="search-tags">
@@ -475,6 +477,12 @@
                         {% endif %}
                         {% if search_assignee %}
                             <span class="search-tag">Assignee: {{ search_assignee }}</span>
+                        {% endif %}
+                        {% if date_from %}
+                            <span class="search-tag">From: {{ date_from }}</span>
+                        {% endif %}
+                        {% if date_to %}
+                            <span class="search-tag">To: {{ date_to }}</span>
                         {% endif %}
                     </div>
                     <a href="{% url 'patent_list' %}" class="clear-search">Clear search</a>
@@ -526,8 +534,6 @@
                                 {% else %}
                                     <span class="analysis-badge">✓ Analysed</span>
                                 {% endif %}
-                            {% else %}
-                                <a href="{% url 'analyse_patent' patent.patent_id %}" class="analyse-btn">Analyse</a>
                             {% endif %}
                         </div>
                     </a>
@@ -539,7 +545,7 @@
                 <div class="pagination">
                     <!-- Previous page -->
                     {% if patents.has_previous %}
-                        <a href="?{% if search_query %}q={{ search_query }}&{% endif %}{% if search_inventor %}inventor={{ search_inventor }}&{% endif %}{% if search_applicant %}applicant={{ search_applicant }}&{% endif %}{% if search_assignee %}assignee={{ search_assignee }}&{% endif %}page={{ patents.previous_page_number }}" class="pagination-btn">Previous</a>
+                        <a href="?{% if search_query %}q={{ search_query }}&{% endif %}{% if search_inventor %}inventor={{ search_inventor }}&{% endif %}{% if search_applicant %}applicant={{ search_applicant }}&{% endif %}{% if search_assignee %}assignee={{ search_assignee }}&{% endif %}{% if date_from %}date_from={{ date_from }}&{% endif %}{% if date_to %}date_to={{ date_to }}&{% endif %}page={{ patents.previous_page_number }}" class="pagination-btn">Previous</a>
                     {% else %}
                         <span class="pagination-btn disabled">Previous</span>
                     {% endif %}
@@ -549,13 +555,13 @@
                         {% if num == patents.number %}
                             <span class="page-number active">{{ num }}</span>
                         {% elif num > patents.number|add:'-3' and num < patents.number|add:'3' %}
-                            <a href="?{% if search_query %}q={{ search_query }}&{% endif %}{% if search_inventor %}inventor={{ search_inventor }}&{% endif %}{% if search_applicant %}applicant={{ search_applicant }}&{% endif %}{% if search_assignee %}assignee={{ search_assignee }}&{% endif %}page={{ num }}" class="page-number">{{ num }}</a>
+                            <a href="?{% if search_query %}q={{ search_query }}&{% endif %}{% if search_inventor %}inventor={{ search_inventor }}&{% endif %}{% if search_applicant %}applicant={{ search_applicant }}&{% endif %}{% if search_assignee %}assignee={{ search_assignee }}&{% endif %}{% if date_from %}date_from={{ date_from }}&{% endif %}{% if date_to %}date_to={{ date_to }}&{% endif %}page={{ num }}" class="page-number">{{ num }}</a>
                         {% endif %}
                     {% endfor %}
 
                     <!-- Next page -->
                     {% if patents.has_next %}
-                        <a href="?{% if search_query %}q={{ search_query }}&{% endif %}{% if search_inventor %}inventor={{ search_inventor }}&{% endif %}{% if search_applicant %}applicant={{ search_applicant }}&{% endif %}{% if search_assignee %}assignee={{ search_assignee }}&{% endif %}page={{ patents.next_page_number }}" class="pagination-btn">Next</a>
+                        <a href="?{% if search_query %}q={{ search_query }}&{% endif %}{% if search_inventor %}inventor={{ search_inventor }}&{% endif %}{% if search_applicant %}applicant={{ search_applicant }}&{% endif %}{% if search_assignee %}assignee={{ search_assignee }}&{% endif %}{% if date_from %}date_from={{ date_from }}&{% endif %}{% if date_to %}date_to={{ date_to }}&{% endif %}page={{ patents.next_page_number }}" class="pagination-btn">Next</a>
                     {% else %}
                         <span class="pagination-btn disabled">Next</span>
                     {% endif %}

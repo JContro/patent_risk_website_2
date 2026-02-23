@@ -2,3 +2,4 @@ Django==5.0.1
 gunicorn==21.2.0
 tqdm
 requests
+plotly>=5.18.0

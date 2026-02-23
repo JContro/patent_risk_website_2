@@ -15,6 +15,7 @@ from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
 from django.urls import reverse
 from urllib.parse import urlencode
 import uuid
+import threading
 
 from .models import User, Patent, Entity, Analysis, SavedSearch
 from .forms import RegistrationForm
@@ -104,7 +105,9 @@ def _parse_json_response(raw_response):
                 'confidence_score': confidence
             })
     
-    return normalized_risks if normalized_risks else None
+    # Return the normalized list (including empty list for "no risks found" case)
+    # This preserves [] from the API rather than converting to None
+    return normalized_risks
 
 
 def landing(request):
@@ -232,8 +235,220 @@ def custom_login(request):
 
 @login_required
 def dashboard(request):
-    """Dashboard with tabs for dashboard and search."""
-    return render(request, 'accounts/dashboard.html', {'user': request.user})
+    """Dashboard with tabs for dashboard, search, and company profile."""
+    from collections import Counter
+    from django.db.models import Count
+    import plotly.utils
+    
+    # Get all saved searches for the current user (for the dropdown)
+    saved_searches = SavedSearch.objects.filter(user=request.user).order_by('-created_at')
+    
+    # Get the selected saved search from query params
+    selected_search_id = request.GET.get('search_id')
+    
+    # Keywords to detect military/surveillance from parsed_risks (from API analysis)
+    military_risk_keywords = ['military', 'weapon', 'defense', 'ordnance', 'munition', 'warfare', 'combat', 'armi', '武器', '軍', 'security', 'attack', 'threat']
+    surveillance_risk_keywords = ['surveillance', 'monitoring', 'tracking', 'recognit', 'spy', 'intercept', 'camer', 'sensor', '監視', '偵查', 'face recognition', 'biometric', 'privacy', 'data collection']
+    
+    # Get analyses - either filtered by selected search or all
+    total_patents_in_search = 0  # Total patents from the search
+    if selected_search_id:
+        try:
+            selected_search = SavedSearch.objects.get(id=selected_search_id, user=request.user)
+            
+            # Build query using the SavedSearch fields (applicant, inventor, assignee, query)
+            from django.db.models import Q
+            
+            # Build Q objects for filtering - match against patent fields directly
+            # Note: When filtering on Patent model directly, don't use 'patent__' prefix
+            # Also, there's no 'assignees' field in Patent - need to search through entities
+            from django.db.models import Q
+            
+            q = Q()
+            
+            if selected_search.applicant:
+                # applicants is a JSON field containing a list
+                q |= Q(applicants__icontains=selected_search.applicant)
+            if selected_search.inventor:
+                # inventors is a JSON field containing a list
+                q |= Q(inventors__icontains=selected_search.inventor)
+            if selected_search.assignee:
+                # Assignees are stored in Entity model with many-to-many relationship
+                # Search through entities with entity_type='assignee'
+                q |= Q(entities__name__icontains=selected_search.assignee, entities__entity_type='assignee')
+            if selected_search.query:
+                q |= Q(title__icontains=selected_search.query)
+            
+            if q:
+                # Get all patents matching the search criteria (for total count)
+                from accounts.models import Patent
+                # Use distinct() to avoid duplicate patents from entity joins
+                matching_patents = Patent.objects.filter(q).distinct()
+                total_patents_in_search = matching_patents.count()
+                
+                # Get analyses for those patents (using the patent_id)
+                patent_ids = list(matching_patents.values_list('patent_id', flat=True))
+                analyses = Analysis.objects.select_related('patent').filter(patent_id__in=patent_ids)
+            else:
+                # No search criteria, fall back to all
+                analyses = Analysis.objects.select_related('patent').all()
+                total_patents_in_search = analyses.count()
+                
+        except SavedSearch.DoesNotExist:
+            analyses = Analysis.objects.select_related('patent').all()
+            selected_search = None
+            total_patents_in_search = 0
+    else:
+        analyses = Analysis.objects.select_related('patent').all()
+        selected_search = None
+        # When showing all, total is the same as analyzed (all are analyzed)
+        total_patents_in_search = analyses.count()
+    
+    # Convert to list for iteration
+    analyses = list(analyses)
+    
+    # Basic stats
+    total_patents = len(analyses)
+    patents_with_risks = 0
+    total_risks = 0
+    
+    # Risk type distribution
+    risk_counts = Counter()
+    
+    # Time series data - group by year-month
+    risks_by_month = Counter()
+    
+    patents_with_military = 0
+    patents_with_surveillance = 0
+    
+    # List of patents with their risk data
+    patent_risk_data = []
+    
+    for analysis in analyses:
+        patent = analysis.patent
+        parsed_risks = analysis.parsed_risks
+        
+        # Check for military/surveillance in the parsed risks (from API)
+        has_military = False
+        has_surveillance = False
+        
+        if parsed_risks and isinstance(parsed_risks, list) and len(parsed_risks) > 0:
+            # Check each risk for military/surveillance keywords
+            for risk in parsed_risks:
+                risk_type = risk.get('risk', '').lower()
+                
+                # Check military keywords
+                if any(kw in risk_type for kw in military_risk_keywords):
+                    has_military = True
+                
+                # Check surveillance keywords
+                if any(kw in risk_type for kw in surveillance_risk_keywords):
+                    has_surveillance = True
+        
+        if has_military:
+            patents_with_military += 1
+        if has_surveillance:
+            patents_with_surveillance += 1
+        
+        # Process risks
+        if parsed_risks and isinstance(parsed_risks, list) and len(parsed_risks) > 0:
+            patents_with_risks += 1
+            total_risks += len(parsed_risks)
+            
+            # Count risk types
+            for risk in parsed_risks:
+                risk_type = risk.get('risk', 'Unknown')
+                risk_counts[risk_type] += 1
+                
+                # Time series - use analysis creation date
+                if analysis.created_at:
+                    month_key = analysis.created_at.strftime('%Y-%m')
+                    risks_by_month[month_key] += 1
+            
+            # Add patent to list with its risks
+            patent_risk_data.append({
+                'patent': patent,
+                'risks': parsed_risks,
+                'has_risks': True,
+                'has_military': has_military,
+                'has_surveillance': has_surveillance,
+            })
+        else:
+            # Add patent without risks
+            patent_risk_data.append({
+                'patent': patent,
+                'risks': [],
+                'has_risks': False,
+                'has_military': has_military,
+                'has_surveillance': has_surveillance,
+            })
+    
+    # Calculate percentages
+    if total_patents > 0:
+        military_percentage = round((patents_with_military / total_patents) * 100, 1)
+        surveillance_percentage = round((patents_with_surveillance / total_patents) * 100, 1)
+        risks_percentage = round((patents_with_risks / total_patents) * 100, 1)
+    else:
+        military_percentage = 0
+        surveillance_percentage = 0
+        risks_percentage = 0
+    
+    # Prepare risk distribution data for Plotly bar chart
+    risk_labels = list(risk_counts.keys())
+    risk_values = list(risk_counts.values())
+    
+    # Prepare time series data for Plotly
+    if risks_by_month:
+        sorted_months = sorted(risks_by_month.keys())
+        time_labels = sorted_months
+        time_values = [risks_by_month[m] for m in sorted_months]
+    else:
+        time_labels = []
+        time_values = []
+    
+    # Build display names for searches
+    searches_with_display = []
+    for search in saved_searches:
+        if search.name:
+            display_name = search.name
+        elif search.applicant:
+            display_name = f"Applicant: {search.applicant}"
+        elif search.assignee:
+            display_name = f"Assignee: {search.assignee}"
+        elif search.inventor:
+            display_name = f"Inventor: {search.inventor}"
+        elif search.query:
+            display_name = f"Search: {search.query}"
+        else:
+            display_name = f"Search #{search.id}"
+        
+        searches_with_display.append({
+            'id': search.id,
+            'display_name': display_name[:50],
+        })
+    
+    # Serialize data for JavaScript
+    context = {
+        'user': request.user,
+        'saved_searches': searches_with_display,
+        'selected_search': selected_search,
+        'total_patents': total_patents,
+        'patents_with_risks': patents_with_risks,
+        'total_risks': total_risks,
+        'patents_with_military': patents_with_military,
+        'patents_with_surveillance': patents_with_surveillance,
+        'military_percentage': military_percentage,
+        'surveillance_percentage': surveillance_percentage,
+        'risks_percentage': risks_percentage,
+        'total_patents_in_search': total_patents_in_search,
+        'risk_labels_json': json.dumps(risk_labels),
+        'risk_values_json': json.dumps(risk_values),
+        'time_labels_json': json.dumps(time_labels),
+        'time_values_json': json.dumps(time_values),
+        'patent_risk_data': patent_risk_data[:50],  # Limit to 50 for performance
+    }
+    
+    return render(request, 'accounts/dashboard.html', context)
 
 @login_required
 def profile(request):
@@ -452,15 +667,20 @@ def autocomplete_entities(request):
 def search_patents(request):
     """
     Search patents by various fields including inventor, applicant, and assignee.
+    Supports multiple values (comma-separated) and date range filtering.
     Shows search form if no query parameters, otherwise shows results.
     """
+    from datetime import datetime
+    
     query = request.GET.get('q', '')
     inventor = request.GET.get('inventor', '')
     applicant = request.GET.get('applicant', '')
     assignee = request.GET.get('assignee', '')  # Owner
+    date_from = request.GET.get('date_from', '')
+    date_to = request.GET.get('date_to', '')
     
     # Check if any search parameters are provided
-    has_search = query or inventor or applicant or assignee
+    has_search = query or inventor or applicant or assignee or date_from or date_to
     
     # Get saved searches for the user if authenticated
     saved_searches = []
@@ -481,6 +701,8 @@ def search_patents(request):
             'search_inventor': '',
             'search_applicant': '',
             'search_assignee': '',
+            'date_from': '',
+            'date_to': '',
             'saved_searches': saved_searches,
             'current_saved_search': current_saved_search,
         })
@@ -496,26 +718,50 @@ def search_patents(request):
             Q(publication_number__icontains=query)
         )
     
-    # Filter by inventor
+    # Filter by multiple inventors (comma-separated) - OR logic
     if inventor:
-        patents = patents.filter(
-            Q(inventors__icontains=inventor)
-        ).distinct()
+        inventor_list = [inv.strip() for inv in inventor.split(',') if inv.strip()]
+        if inventor_list:
+            inventor_q = Q()
+            for inv in inventor_list:
+                inventor_q |= Q(inventors__icontains=inv)
+            patents = patents.filter(inventor_q).distinct()
     
-    # Filter by applicant
+    # Filter by multiple applicants (comma-separated) - OR logic
     if applicant:
-        patents = patents.filter(
-            Q(applicants__icontains=applicant)
-        ).distinct()
+        applicant_list = [app.strip() for app in applicant.split(',') if app.strip()]
+        if applicant_list:
+            applicant_q = Q()
+            for app in applicant_list:
+                applicant_q |= Q(applicants__icontains=app)
+            patents = patents.filter(applicant_q).distinct()
     
-    # Filter by assignee (owner) - using Entity model
+    # Filter by multiple assignees (owners) - OR logic
     if assignee:
-        # Use the reverse ManyToMany relation from Patent to Entity
-        # The Entity model has patents=ManyToManyField(Patent), so we access via 'entities'
-        patents = patents.filter(
-            entities__name__icontains=assignee,
-            entities__entity_type='assignee'
-        ).distinct()
+        assignee_list = [ass.strip() for ass in assignee.split(',') if ass.strip()]
+        if assignee_list:
+            assignee_q = Q()
+            for ass in assignee_list:
+                assignee_q |= Q(entities__name__icontains=ass)
+            patents = patents.filter(
+                assignee_q,
+                entities__entity_type='assignee'
+            ).distinct()
+    
+    # Filter by date range
+    if date_from:
+        try:
+            from_date = datetime.strptime(date_from, '%Y-%m-%d').date()
+            patents = patents.filter(publication_date__gte=from_date)
+        except ValueError:
+            pass  # Invalid date format, ignore
+    
+    if date_to:
+        try:
+            to_date = datetime.strptime(date_to, '%Y-%m-%d').date()
+            patents = patents.filter(publication_date__lte=to_date)
+        except ValueError:
+            pass  # Invalid date format, ignore
     
     # Order by publication date (newest first)
     patents = patents.order_by('-publication_date', '-patent_id')
@@ -538,6 +784,8 @@ def search_patents(request):
         'search_inventor': inventor,
         'search_applicant': applicant,
         'search_assignee': assignee,
+        'date_from': date_from,
+        'date_to': date_to,
         'saved_searches': saved_searches,
         'current_saved_search': current_saved_search,
     })
@@ -602,15 +850,26 @@ def delete_saved_search(request, search_id):
     return redirect('search_patents')
 
 
-@login_required
-def analyse_all_patents(request):
+def _run_background_analysis(saved_search_id, user_id):
     """
-    Analyze all patents from a saved search.
-    Takes a saved_search_id parameter and analyses all patents matching that search.
+    Background task to analyze all patents from a saved search.
+    This runs in a separate thread so the user isn't blocked.
     """
-    if request.method == 'POST':
-        saved_search_id = request.POST.get('saved_search_id')
-        saved_search = get_object_or_404(SavedSearch, id=saved_search_id, user=request.user)
+    # Re-setup Django inside the thread
+    import django
+    import os
+    os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')
+    django.setup()
+    
+    from django.contrib.auth import get_user_model
+    from django.db import transaction
+    
+    User = get_user_model()
+    
+    try:
+        # Get the saved search and user
+        saved_search = SavedSearch.objects.get(id=saved_search_id, user_id=user_id)
+        user = User.objects.get(id=user_id)
         
         # Re-run the search to get matching patents
         patents = Patent.objects.all()
@@ -644,7 +903,7 @@ def analyse_all_patents(request):
             ).distinct()
         
         # Get patents that haven't been analyzed yet
-        patents_to_analyze = patents.filter(analysis__isnull=True)
+        patents_to_analyze = list(patents.filter(analysis__isnull=True))
         
         # Get the prompt template from settings
         prompt_template = getattr(settings, 'PATENT_ANALYSIS_PROMPT', '')
@@ -653,8 +912,8 @@ def analyse_all_patents(request):
         api_key = getattr(settings, 'OPENROUTER_API_KEY', '')
         
         if not prompt_template or not api_key:
-            messages.error(request, 'Analysis not configured. Please contact the administrator.')
-            return redirect('search_patents')
+            print("Analysis not configured - missing prompt template or API key")
+            return
         
         analyzed_count = 0
         for patent in patents_to_analyze:
@@ -666,23 +925,93 @@ def analyse_all_patents(request):
                 if raw_response:
                     parsed_risks = _parse_json_response(raw_response)
                 
-                Analysis.objects.update_or_create(
-                    patent=patent,
-                    defaults={
-                        'raw_response': raw_response,
-                        'parsed_risks': parsed_risks
-                    }
-                )
+                with transaction.atomic():
+                    Analysis.objects.update_or_create(
+                        patent=patent,
+                        defaults={
+                            'raw_response': raw_response,
+                            'parsed_risks': parsed_risks
+                        }
+                    )
                 analyzed_count += 1
+                print(f"Analyzed patent {patent.patent_id} ({analyzed_count}/{len(patents_to_analyze)})")
             except Exception as e:
                 print(f"Error analyzing patent {patent.patent_id}: {e}")
         
-        if analyzed_count > 0:
-            messages.success(request, f'Successfully analyzed {analyzed_count} patents from your saved search.')
-        else:
-            messages.info(request, 'No new patents to analyze. All patents in this search have already been analyzed.')
+        print(f"Background analysis complete: {analyzed_count} patents analyzed")
         
-        # Redirect back to the search results page (not the all patents list)
+    except SavedSearch.DoesNotExist:
+        print(f"Saved search {saved_search_id} not found")
+    except Exception as e:
+        print(f"Background analysis failed: {e}")
+
+
+@login_required
+def analyse_all_patents(request):
+    """
+    Analyze all patents from a saved search.
+    Takes a saved_search_id parameter and starts background analysis.
+    """
+    if request.method == 'POST':
+        saved_search_id = request.POST.get('saved_search_id')
+        saved_search = get_object_or_404(SavedSearch, id=saved_search_id, user=request.user)
+        
+        # Get the prompt template from settings to validate configuration
+        prompt_template = getattr(settings, 'PATENT_ANALYSIS_PROMPT', '')
+        api_key = getattr(settings, 'OPENROUTER_API_KEY', '')
+        
+        if not prompt_template or not api_key:
+            messages.error(request, 'Analysis not configured. Please contact the administrator.')
+            return redirect('search_patents')
+        
+        # Count patents to analyze
+        query = saved_search.query
+        inventor = saved_search.inventor
+        applicant = saved_search.applicant
+        assignee = saved_search.assignee
+        
+        patents = Patent.objects.all()
+        
+        if query:
+            patents = patents.filter(
+                Q(title__icontains=query) |
+                Q(abstract__icontains=query) |
+                Q(publication_number__icontains=query)
+            )
+        
+        if inventor:
+            patents = patents.filter(
+                Q(inventors__icontains=inventor)
+            ).distinct()
+        
+        if applicant:
+            patents = patents.filter(
+                Q(applicants__icontains=applicant)
+            ).distinct()
+        
+        if assignee:
+            patents = patents.filter(
+                entities__name__icontains=assignee,
+                entities__entity_type='assignee'
+            ).distinct()
+        
+        patents_to_analyze = patents.filter(analysis__isnull=True)
+        count = patents_to_analyze.count()
+        
+        if count == 0:
+            messages.info(request, 'No new patents to analyze. All patents in this search have already been analyzed.')
+        else:
+            # Start background analysis in a separate thread
+            thread = threading.Thread(
+                target=_run_background_analysis,
+                args=(saved_search.id, request.user.id)
+            )
+            thread.daemon = True
+            thread.start()
+            
+            messages.success(request, f'Analysis started! {count} patents will be analyzed in the background. You can leave this page - the analysis will continue.')
+        
+        # Redirect back to the search results page
         params = {}
         if saved_search.query:
             params['q'] = saved_search.query

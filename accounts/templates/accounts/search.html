@@ -424,28 +424,42 @@
                                    value="{{ search_query|default:'' }}">
                         </div>
                         
-                        <!-- Inventor Search with Autocomplete -->
-                        <div class="search-field autocomplete-wrapper">
-                            <label for="inventor-search">Inventor</label>
-                            <input type="text" id="inventor-search" name="inventor" placeholder="Start typing inventor name..."
-                                   value="{{ search_inventor|default:'' }}" autocomplete="off">
-                            <div class="autocomplete-suggestions" id="inventor-suggestions"></div>
+                        <!-- Multi-value Inventor Search -->
+                        <div class="search-field">
+                            <label for="inventor-search">Inventors (comma-separated)</label>
+                            <input type="text" id="inventor-search" name="inventor"
+                                   placeholder="e.g. John Smith, Jane Doe, Acme Corp..."
+                                   value="{{ search_inventor|default:'' }}">
                         </div>
                         
-                        <!-- Applicant Search with Autocomplete -->
-                        <div class="search-field autocomplete-wrapper">
-                            <label for="applicant-search">Applicant</label>
-                            <input type="text" id="applicant-search" name="applicant" placeholder="Start typing applicant name..."
-                                   value="{{ search_applicant|default:'' }}" autocomplete="off">
-                            <div class="autocomplete-suggestions" id="applicant-suggestions"></div>
+                        <!-- Multi-value Applicant Search -->
+                        <div class="search-field">
+                            <label for="applicant-search">Applicants (comma-separated)</label>
+                            <input type="text" id="applicant-search" name="applicant"
+                                   placeholder="e.g. Google, Microsoft, IBM..."
+                                   value="{{ search_applicant|default:'' }}">
                         </div>
                         
-                        <!-- Owner (Assignee) Search with Autocomplete -->
-                        <div class="search-field autocomplete-wrapper">
-                            <label for="owner-search">Owner / Assignee</label>
-                            <input type="text" id="owner-search" name="assignee" placeholder="Start typing owner name..."
-                                   value="{{ search_assignee|default:'' }}" autocomplete="off">
-                            <div class="autocomplete-suggestions" id="owner-suggestions"></div>
+                        <!-- Multi-value Owner (Assignee) Search -->
+                        <div class="search-field">
+                            <label for="owner-search">Owners / Assignees (comma-separated)</label>
+                            <input type="text" id="owner-search" name="assignee"
+                                   placeholder="e.g. Google, Microsoft, Apple..."
+                                   value="{{ search_assignee|default:'' }}">
+                        </div>
+                        
+                        <!-- Date Range Search -->
+                        <div class="search-field" style="display: flex; gap: 1rem;">
+                            <div style="flex: 1;">
+                                <label for="date-from">Date From</label>
+                                <input type="date" id="date-from" name="date_from"
+                                       value="{{ date_from|default:'' }}">
+                            </div>
+                            <div style="flex: 1;">
+                                <label for="date-to">Date To</label>
+                                <input type="date" id="date-to" name="date_to"
+                                       value="{{ date_to|default:'' }}">
+                            </div>
                         </div>
                         
                         <button type="submit" class="search-button">Search Patents</button>
