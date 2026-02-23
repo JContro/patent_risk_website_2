@@ -654,7 +654,7 @@ def analyse_all_patents(request):
         
         if not prompt_template or not api_key:
             messages.error(request, 'Analysis not configured. Please contact the administrator.')
-            return redirect('patent_list')
+            return redirect('search_patents')
         
         analyzed_count = 0
         for patent in patents_to_analyze:
@@ -682,7 +682,7 @@ def analyse_all_patents(request):
         else:
             messages.info(request, 'No new patents to analyze. All patents in this search have already been analyzed.')
         
-        # Redirect back to the saved search results
+        # Redirect back to the search results page (not the all patents list)
         params = {}
         if saved_search.query:
             params['q'] = saved_search.query
@@ -693,7 +693,7 @@ def analyse_all_patents(request):
         if saved_search.assignee:
             params['assignee'] = saved_search.assignee
         
-        url = reverse('patent_list')
+        url = reverse('search_patents')
         if params:
             url += '?' + urlencode(params)
         return redirect(url)
