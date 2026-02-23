@@ -158,6 +158,9 @@ class Analysis(models.Model):
     # Raw response from OpenRouter API
     raw_response = models.TextField(blank=True, null=True)
     
+    # Parsed JSON response (list of risks with snippet, risk type, confidence)
+    parsed_risks = models.JSONField(blank=True, null=True)
+    
     # Timestamp
     created_at = models.DateTimeField(auto_now_add=True)
     

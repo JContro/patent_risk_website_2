@@ -268,10 +268,23 @@ def analyse_patent(request, patent_id):
         # Call the OpenRouter API to analyze the patent
         raw_response = analyse_patent_with_openrouter(patent, prompt_template)
         
-        # Create or update the analysis entry with the raw response
+        # Parse the JSON response from the API
+        parsed_risks = None
+        if raw_response:
+            try:
+                # Try to parse the response as JSON
+                parsed_risks = json.loads(raw_response)
+            except json.JSONDecodeError:
+                # If parsing fails, keep it as raw text
+                parsed_risks = None
+        
+        # Create or update the analysis entry with the raw response and parsed risks
         analysis, created = Analysis.objects.update_or_create(
             patent=patent,
-            defaults={'raw_response': raw_response}
+            defaults={
+                'raw_response': raw_response,
+                'parsed_risks': parsed_risks
+            }
         )
         
         if created:
@@ -569,9 +582,21 @@ def analyse_all_patents(request):
         for patent in patents_to_analyze:
             try:
                 raw_response = analyse_patent_with_openrouter(patent, prompt_template)
+                
+                # Parse the JSON response from the API
+                parsed_risks = None
+                if raw_response:
+                    try:
+                        parsed_risks = json.loads(raw_response)
+                    except json.JSONDecodeError:
+                        parsed_risks = None
+                
                 Analysis.objects.update_or_create(
                     patent=patent,
-                    defaults={'raw_response': raw_response}
+                    defaults={
+                        'raw_response': raw_response,
+                        'parsed_risks': parsed_risks
+                    }
                 )
                 analyzed_count += 1
             except Exception as e:

@@ -1,3 +1,4 @@
+{% load analysis_tags %}
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -233,13 +234,23 @@
             display: inline-flex;
             align-items: center;
             gap: 0.25rem;
-            background: linear-gradient(90deg, #34c759, #30d158);
+            background: linear-gradient(90deg, #ff3b30, #ff6b6b);
             color: white;
             padding: 0.25rem 0.75rem;
             border-radius: 50px;
             font-size: 0.75rem;
             font-weight: 600;
             margin-left: 0.5rem;
+        }
+
+        /* Analysis Badge - No Risks (Green) */
+        .analysis-badge.no-risks {
+            background: linear-gradient(90deg, #34c759, #30d158);
+        }
+
+        /* Analysis Badge - Has Risks (Red) */
+        .analysis-badge.has-risks {
+            background: linear-gradient(90deg, #ff3b30, #ff6b6b);
         }
 
         /* Analyse Button */
@@ -508,7 +519,13 @@
                         
                         <div class="patent-actions">
                             {% if patent.analysis %}
-                                <span class="analysis-badge">✓ Analysed</span>
+                                {% if patent.analysis.parsed_risks|is_empty_list %}
+                                    <span class="analysis-badge no-risks">✓ No Risks</span>
+                                {% elif patent.analysis.parsed_risks|has_risks %}
+                                    <span class="analysis-badge has-risks">⚠ {{ patent.analysis.parsed_risks|get_risk_count }} Risk(s)</span>
+                                {% else %}
+                                    <span class="analysis-badge">✓ Analysed</span>
+                                {% endif %}
                             {% else %}
                                 <a href="{% url 'analyse_patent' patent.patent_id %}" class="analyse-btn">Analyse</a>
                             {% endif %}
