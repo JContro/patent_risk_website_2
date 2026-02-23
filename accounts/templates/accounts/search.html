@@ -17,7 +17,96 @@
         }
 
         .container {
-            max-width: 800px;
+            max-width: 1400px;
+            margin: 0 auto;
+            display: flex;
+            gap: 2rem;
+        }
+
+        /* Sidebar */
+        .sidebar {
+            width: 280px;
+            flex-shrink: 0;
+        }
+
+        .sidebar-section {
+            background: white;
+            border-radius: 16px;
+            padding: 1.5rem;
+            box-shadow: 0 2px 10px rgba(0, 113, 227, 0.08);
+            margin-bottom: 1.5rem;
+        }
+
+        .sidebar-title {
+            font-size: 1.1rem;
+            font-weight: 700;
+            color: #1d1d1f;
+            margin-bottom: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .saved-search-list {
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+        }
+
+        .saved-search-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0.75rem;
+            background: #f5f7ff;
+            border-radius: 10px;
+            transition: all 0.3s;
+        }
+
+        .saved-search-item:hover {
+            background: #e3e9ff;
+        }
+
+        .saved-search-link {
+            text-decoration: none;
+            color: #0071e3;
+            font-weight: 500;
+            flex: 1;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .saved-search-delete {
+            color: #ff3b30;
+            background: none;
+            border: none;
+            cursor: pointer;
+            padding: 0.25rem;
+            font-size: 1rem;
+            opacity: 0.6;
+            transition: opacity 0.3s;
+        }
+
+        .saved-search-delete:hover {
+            opacity: 1;
+        }
+
+        .no-saved-searches {
+            color: #6e6e73;
+            font-size: 0.9rem;
+            text-align: center;
+            padding: 1rem;
+        }
+
+        /* Main Content */
+        .main-content {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .main-content .container-inner {
+            max-width: 900px;
             margin: 0 auto;
         }
 
@@ -293,73 +382,114 @@
 </head>
 <body>
     <div class="container">
-        <div class="header">
-            <div class="header-left">
-                <a href="{% url 'landing' %}" class="logo">Patent Risk Radar</a>
-                <nav class="nav-links">
-                    <a href="{% url 'dashboard' %}" class="nav-link">Dashboard</a>
-                    <a href="{% url 'search_patents' %}" class="nav-link active">Search</a>
-                    <a href="{% url 'patent_list' %}" class="nav-link">Patents</a>
-                </nav>
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="sidebar-section">
+                <h3 class="sidebar-title">📁 Saved Searches</h3>
+                {% if saved_searches %}
+                    <div class="saved-search-list">
+                        {% for saved in saved_searches %}
+                            <div class="saved-search-item">
+                                <a href="{% url 'search_patents' %}?{% if saved.query %}q={{ saved.query }}&{% endif %}{% if saved.inventor %}inventor={{ saved.inventor }}&{% endif %}{% if saved.applicant %}applicant={{ saved.applicant }}&{% endif %}{% if saved.assignee %}assignee={{ saved.assignee }}{% endif %}" class="saved-search-link" title="{{ saved.query|default:'' }} {{ saved.inventor|default:'' }} {{ saved.applicant|default:'' }} {{ saved.assignee|default:'' }}">
+                                    {% if saved.name %}
+                                        {{ saved.name }}
+                                    {% elif saved.query %}
+                                        {{ saved.query|truncatechars:20 }}
+                                    {% elif saved.inventor %}
+                                        Inventor: {{ saved.inventor|truncatechars:15 }}
+                                    {% elif saved.applicant %}
+                                        Applicant: {{ saved.applicant|truncatechars:15 }}
+                                    {% elif saved.assignee %}
+                                        Assignee: {{ saved.assignee|truncatechars:15 }}
+                                    {% else %}
+                                        Search {{ forloop.counter }}
+                                    {% endif %}
+                                </a>
+                                <form method="post" action="{% url 'delete_saved_search' saved.id %}" style="display: inline;">
+                                    {% csrf_token %}
+                                    <button type="submit" class="saved-search-delete" title="Delete">✕</button>
+                                </form>
+                            </div>
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    <p class="no-saved-searches">No saved searches yet. Run a search and save it!</p>
+                {% endif %}
             </div>
-            <div class="user-info">
-                <div class="user-avatar">{{ user.username|first|upper }}</div>
-                <div class="user-details">
-                    <h3>{{ user.username }}</h3>
-                    <p>{{ user.email }}</p>
-                </div>
-                <form method="post" action="{% url 'logout' %}" style="display: inline;">
-                    {% csrf_token %}
-                    <button type="submit" class="logout-btn">Log Out</button>
-                </form>
-            </div>
-        </div>
+        </aside>
 
-        <div class="page-header">
-            <h1>Search AI Patents</h1>
-            <p>Search for AI-related patents and assess their dual-use and civic risks. Filter by inventor, applicant, owner, and more.</p>
-        </div>
+        <!-- Main Content -->
+        <main class="main-content">
+            <div class="container-inner">
+                <div class="header">
+                    <div class="header-left">
+                        <a href="{% url 'landing' %}" class="logo">Patent Risk Radar</a>
+                        <nav class="nav-links">
+                            <a href="{% url 'dashboard' %}" class="nav-link">Dashboard</a>
+                            <a href="{% url 'search_patents' %}" class="nav-link active">Search</a>
+                            <a href="{% url 'patent_list' %}" class="nav-link">Patents</a>
+                        </nav>
+                    </div>
+                    <div class="user-info">
+                        <div class="user-avatar">{{ user.username|first|upper }}</div>
+                        <div class="user-details">
+                            <h3>{{ user.username }}</h3>
+                            <p>{{ user.email }}</p>
+                        </div>
+                        <form method="post" action="{% url 'logout' %}" style="display: inline;">
+                            {% csrf_token %}
+                            <button type="submit" class="logout-btn">Log Out</button>
+                        </form>
+                    </div>
+                </div>
 
-        <div class="search-container">
-            <form action="{% url 'search_patents' %}" method="get" class="search-form">
-                <!-- General Search -->
-                <div class="search-field">
-                    <label for="general-search">General Search</label>
-                    <input type="text" id="general-search" name="q" placeholder="Search by title, abstract, or patent number..."
-                           value="{{ search_query|default:'' }}">
+                <div class="page-header">
+                    <h1>Search AI Patents</h1>
+                    <p>Search for AI-related patents and assess their dual-use and civic risks. Filter by inventor, applicant, owner, and more.</p>
                 </div>
-                
-                <!-- Inventor Search with Autocomplete -->
-                <div class="search-field autocomplete-wrapper">
-                    <label for="inventor-search">Inventor</label>
-                    <input type="text" id="inventor-search" name="inventor" placeholder="Start typing inventor name..."
-                           value="{{ search_inventor|default:'' }}" autocomplete="off">
-                    <div class="autocomplete-suggestions" id="inventor-suggestions"></div>
+
+                <div class="search-container">
+                    <form action="{% url 'search_patents' %}" method="get" class="search-form">
+                        <!-- General Search -->
+                        <div class="search-field">
+                            <label for="general-search">General Search</label>
+                            <input type="text" id="general-search" name="q" placeholder="Search by title, abstract, or patent number..."
+                                   value="{{ search_query|default:'' }}">
+                        </div>
+                        
+                        <!-- Inventor Search with Autocomplete -->
+                        <div class="search-field autocomplete-wrapper">
+                            <label for="inventor-search">Inventor</label>
+                            <input type="text" id="inventor-search" name="inventor" placeholder="Start typing inventor name..."
+                                   value="{{ search_inventor|default:'' }}" autocomplete="off">
+                            <div class="autocomplete-suggestions" id="inventor-suggestions"></div>
+                        </div>
+                        
+                        <!-- Applicant Search with Autocomplete -->
+                        <div class="search-field autocomplete-wrapper">
+                            <label for="applicant-search">Applicant</label>
+                            <input type="text" id="applicant-search" name="applicant" placeholder="Start typing applicant name..."
+                                   value="{{ search_applicant|default:'' }}" autocomplete="off">
+                            <div class="autocomplete-suggestions" id="applicant-suggestions"></div>
+                        </div>
+                        
+                        <!-- Owner (Assignee) Search with Autocomplete -->
+                        <div class="search-field autocomplete-wrapper">
+                            <label for="owner-search">Owner / Assignee</label>
+                            <input type="text" id="owner-search" name="assignee" placeholder="Start typing owner name..."
+                                   value="{{ search_assignee|default:'' }}" autocomplete="off">
+                            <div class="autocomplete-suggestions" id="owner-suggestions"></div>
+                        </div>
+                        
+                        <button type="submit" class="search-button">Search Patents</button>
+                    </form>
+                    
+                    <div class="search-hint">
+                        <p>Tip: Use any combination of fields to narrow your search. Leave fields empty to see all patents.</p>
+                    </div>
                 </div>
-                
-                <!-- Applicant Search with Autocomplete -->
-                <div class="search-field autocomplete-wrapper">
-                    <label for="applicant-search">Applicant</label>
-                    <input type="text" id="applicant-search" name="applicant" placeholder="Start typing applicant name..."
-                           value="{{ search_applicant|default:'' }}" autocomplete="off">
-                    <div class="autocomplete-suggestions" id="applicant-suggestions"></div>
-                </div>
-                
-                <!-- Owner (Assignee) Search with Autocomplete -->
-                <div class="search-field autocomplete-wrapper">
-                    <label for="owner-search">Owner / Assignee</label>
-                    <input type="text" id="owner-search" name="assignee" placeholder="Start typing owner name..."
-                           value="{{ search_assignee|default:'' }}" autocomplete="off">
-                    <div class="autocomplete-suggestions" id="owner-suggestions"></div>
-                </div>
-                
-                <button type="submit" class="search-button">Search Patents</button>
-            </form>
-            
-            <div class="search-hint">
-                <p>Tip: Use any combination of fields to narrow your search. Leave fields empty to see all patents.</p>
             </div>
-        </div>
+        </main>
     </div>
 
     <script>

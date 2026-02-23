@@ -166,3 +166,30 @@ class Analysis(models.Model):
     
     def __str__(self):
         return f"Analysis for Patent {self.patent.publication_number}"
+
+
+class SavedSearch(models.Model):
+    """
+    Saved search model linked to a user.
+    Stores search parameters so users can re-run searches later.
+    """
+    # Foreign key to User
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='saved_searches')
+    
+    # Search name (optional, user can name their search)
+    name = models.CharField(max_length=255, blank=True, null=True)
+    
+    # Search parameters (stored as JSON)
+    query = models.CharField(max_length=500, blank=True, null=True)
+    inventor = models.CharField(max_length=255, blank=True, null=True)
+    applicant = models.CharField(max_length=255, blank=True, null=True)
+    assignee = models.CharField(max_length=255, blank=True, null=True)
+    
+    # Timestamp
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        ordering = ['-created_at']
+    
+    def __str__(self):
+        return f"SavedSearch {self.name or self.query} by {self.user.email}"

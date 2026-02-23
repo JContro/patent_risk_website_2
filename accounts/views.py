@@ -12,9 +12,11 @@ from django.utils import timezone
 from django.contrib import messages
 from django.conf import settings
 from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
+from django.urls import reverse
+from urllib.parse import urlencode
 import uuid
 
-from .models import User, Patent, Entity, Analysis
+from .models import User, Patent, Entity, Analysis, SavedSearch
 from .forms import RegistrationForm
 from django.db.models import Q
 from django.conf import settings
@@ -351,6 +353,11 @@ def search_patents(request):
     # Check if any search parameters are provided
     has_search = query or inventor or applicant or assignee
     
+    # Get saved searches for the user if authenticated
+    saved_searches = []
+    if request.user.is_authenticated:
+        saved_searches = SavedSearch.objects.filter(user=request.user)[:10]
+    
     if not has_search:
         # Show search form (empty)
         return render(request, 'accounts/search.html', {
@@ -358,6 +365,7 @@ def search_patents(request):
             'search_inventor': '',
             'search_applicant': '',
             'search_assignee': '',
+            'saved_searches': saved_searches,
         })
     
     # Start with all patents
@@ -413,4 +421,64 @@ def search_patents(request):
         'search_inventor': inventor,
         'search_applicant': applicant,
         'search_assignee': assignee,
+        'saved_searches': saved_searches,
     })
+
+
+@login_required
+def save_search(request):
+    """
+    Save the current search parameters for the logged-in user.
+    """
+    if request.method == 'POST':
+        query = request.POST.get('query', '')
+        inventor = request.POST.get('inventor', '')
+        applicant = request.POST.get('applicant', '')
+        assignee = request.POST.get('assignee', '')
+        name = request.POST.get('name', '')
+        
+        # Check if at least one search parameter is provided
+        if not (query or inventor or applicant or assignee):
+            messages.error(request, 'Please provide at least one search parameter.')
+            return redirect('search_patents')
+        
+        # Create the saved search
+        saved_search = SavedSearch.objects.create(
+            user=request.user,
+            name=name if name else None,
+            query=query,
+            inventor=inventor,
+            applicant=applicant,
+            assignee=assignee,
+        )
+        
+        messages.success(request, 'Search saved successfully!')
+        
+        # Redirect back to the search results
+        params = {}
+        if query:
+            params['q'] = query
+        if inventor:
+            params['inventor'] = inventor
+        if applicant:
+            params['applicant'] = applicant
+        if assignee:
+            params['assignee'] = assignee
+        
+        url = reverse('patent_list')
+        if params:
+            url += '?' + urlencode(params)
+        return redirect(url)
+    
+    return redirect('search_patents')
+
+
+@login_required
+def delete_saved_search(request, search_id):
+    """
+    Delete a saved search.
+    """
+    saved_search = get_object_or_404(SavedSearch, id=search_id, user=request.user)
+    saved_search.delete()
+    messages.success(request, 'Saved search deleted.')
+    return redirect('search_patents')

@@ -17,8 +17,92 @@
         }
 
         .container {
-            max-width: 1200px;
+            max-width: 1400px;
             margin: 0 auto;
+            display: flex;
+            gap: 2rem;
+        }
+
+        /* Sidebar */
+        .sidebar {
+            width: 280px;
+            flex-shrink: 0;
+        }
+
+        .sidebar-section {
+            background: white;
+            border-radius: 16px;
+            padding: 1.5rem;
+            box-shadow: 0 2px 10px rgba(0, 113, 227, 0.08);
+            margin-bottom: 1.5rem;
+        }
+
+        .sidebar-title {
+            font-size: 1.1rem;
+            font-weight: 700;
+            color: #1d1d1f;
+            margin-bottom: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .saved-search-list {
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+        }
+
+        .saved-search-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0.75rem;
+            background: #f5f7ff;
+            border-radius: 10px;
+            transition: all 0.3s;
+        }
+
+        .saved-search-item:hover {
+            background: #e3e9ff;
+        }
+
+        .saved-search-link {
+            text-decoration: none;
+            color: #0071e3;
+            font-weight: 500;
+            flex: 1;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .saved-search-delete {
+            color: #ff3b30;
+            background: none;
+            border: none;
+            cursor: pointer;
+            padding: 0.25rem;
+            font-size: 1rem;
+            opacity: 0.6;
+            transition: opacity 0.3s;
+        }
+
+        .saved-search-delete:hover {
+            opacity: 1;
+        }
+
+        .no-saved-searches {
+            color: #6e6e73;
+            font-size: 0.9rem;
+            text-align: center;
+            padding: 1rem;
+        }
+
+        /* Main Content */
+        .main-content {
+            flex: 1;
+            min-width: 0;
         }
 
         /* Header */
@@ -309,48 +393,102 @@
 </head>
 <body>
     <div class="container">
-        <header class="header">
-            <a href="{% url 'landing' %}" class="logo">Patent Risk Radar</a>
-            <nav class="nav-links">
-                <a href="{% url 'dashboard' %}" class="nav-link">Dashboard</a>
-                <a href="{% url 'search_patents' %}" class="nav-link">Search</a>
-                <a href="{% url 'patent_list' %}" class="nav-link">Patents</a>
-                <form method="post" action="{% url 'logout' %}" style="display: inline;">
-                    {% csrf_token %}
-                    <button type="submit" class="nav-link" style="background: none; border: none; cursor: pointer;">Logout</button>
-                </form>
-            </nav>
-        </header>
-
-        <h1 class="page-title">
-            {% if search_query or search_inventor or search_applicant or search_assignee %}
-                Search Results
-            {% else %}
-                Patents
-            {% endif %}
-        </h1>
-
-        <!-- Display current search query -->
-        {% if search_query or search_inventor or search_applicant or search_assignee %}
-            <div class="search-info">
-                <p>Showing results for:</p>
-                <div class="search-tags">
-                    {% if search_query %}
-                        <span class="search-tag">Query: {{ search_query }}</span>
-                    {% endif %}
-                    {% if search_inventor %}
-                        <span class="search-tag">Inventor: {{ search_inventor }}</span>
-                    {% endif %}
-                    {% if search_applicant %}
-                        <span class="search-tag">Applicant: {{ search_applicant }}</span>
-                    {% endif %}
-                    {% if search_assignee %}
-                        <span class="search-tag">Assignee: {{ search_assignee }}</span>
-                    {% endif %}
-                </div>
-                <a href="{% url 'patent_list' %}" class="clear-search">Clear search</a>
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="sidebar-section">
+                <h3 class="sidebar-title">📁 Saved Searches</h3>
+                {% if saved_searches %}
+                    <div class="saved-search-list">
+                        {% for saved in saved_searches %}
+                            <div class="saved-search-item">
+                                <a href="{% url 'search_patents' %}?{% if saved.query %}q={{ saved.query }}&{% endif %}{% if saved.inventor %}inventor={{ saved.inventor }}&{% endif %}{% if saved.applicant %}applicant={{ saved.applicant }}&{% endif %}{% if saved.assignee %}assignee={{ saved.assignee }}{% endif %}" class="saved-search-link" title="{{ saved.query|default:'' }} {{ saved.inventor|default:'' }} {{ saved.applicant|default:'' }} {{ saved.assignee|default:'' }}">
+                                    {% if saved.name %}
+                                        {{ saved.name }}
+                                    {% elif saved.query %}
+                                        {{ saved.query|truncatechars:20 }}
+                                    {% elif saved.inventor %}
+                                        Inventor: {{ saved.inventor|truncatechars:15 }}
+                                    {% elif saved.applicant %}
+                                        Applicant: {{ saved.applicant|truncatechars:15 }}
+                                    {% elif saved.assignee %}
+                                        Assignee: {{ saved.assignee|truncatechars:15 }}
+                                    {% else %}
+                                        Search {{ forloop.counter }}
+                                    {% endif %}
+                                </a>
+                                <form method="post" action="{% url 'delete_saved_search' saved.id %}" style="display: inline;">
+                                    {% csrf_token %}
+                                    <button type="submit" class="saved-search-delete" title="Delete">✕</button>
+                                </form>
+                            </div>
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    <p class="no-saved-searches">No saved searches yet. Run a search and save it!</p>
+                {% endif %}
             </div>
-        {% endif %}
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <header class="header">
+                <a href="{% url 'landing' %}" class="logo">Patent Risk Radar</a>
+                <nav class="nav-links">
+                    <a href="{% url 'dashboard' %}" class="nav-link">Dashboard</a>
+                    <a href="{% url 'search_patents' %}" class="nav-link">Search</a>
+                    <a href="{% url 'patent_list' %}" class="nav-link">Patents</a>
+                    <form method="post" action="{% url 'logout' %}" style="display: inline;">
+                        {% csrf_token %}
+                        <button type="submit" class="nav-link" style="background: none; border: none; cursor: pointer;">Logout</button>
+                    </form>
+                </nav>
+            </header>
+
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem;">
+                <h1 class="page-title" style="margin-bottom: 0;">
+                    {% if search_query or search_inventor or search_applicant or search_assignee %}
+                        Search Results
+                    {% else %}
+                        Patents
+                    {% endif %}
+                </h1>
+                
+                <!-- Save Search Button -->
+                {% if search_query or search_inventor or search_applicant or search_assignee %}
+                    <form method="post" action="{% url 'save_search' %}" style="display: inline;">
+                        {% csrf_token %}
+                        <input type="hidden" name="query" value="{{ search_query }}">
+                        <input type="hidden" name="inventor" value="{{ search_inventor }}">
+                        <input type="hidden" name="applicant" value="{{ search_applicant }}">
+                        <input type="hidden" name="assignee" value="{{ search_assignee }}">
+                        <button type="submit" style="background: linear-gradient(90deg, #0071e3, #5856d6); color: white; border: none; padding: 0.7rem 1.5rem; border-radius: 50px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 0.5rem;">
+                            💾 Save Search
+                        </button>
+                    </form>
+                {% endif %}
+            </div>
+
+            <!-- Display current search query -->
+            {% if search_query or search_inventor or search_applicant or search_assignee %}
+                <div class="search-info">
+                    <p>Showing results for:</p>
+                    <div class="search-tags">
+                        {% if search_query %}
+                            <span class="search-tag">Query: {{ search_query }}</span>
+                        {% endif %}
+                        {% if search_inventor %}
+                            <span class="search-tag">Inventor: {{ search_inventor }}</span>
+                        {% endif %}
+                        {% if search_applicant %}
+                            <span class="search-tag">Applicant: {{ search_applicant }}</span>
+                        {% endif %}
+                        {% if search_assignee %}
+                            <span class="search-tag">Assignee: {{ search_assignee }}</span>
+                        {% endif %}
+                    </div>
+                    <a href="{% url 'patent_list' %}" class="clear-search">Clear search</a>
+                </div>
+            {% endif %}
 
         {% if patents %}
             <div class="patent-list">
@@ -435,6 +573,7 @@
                 <p>There are no patents in the database yet.</p>
             </div>
         {% endif %}
+        </main>
     </div>
 </body>
 </html>

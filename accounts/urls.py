@@ -17,4 +17,6 @@ urlpatterns = [
     # Autocomplete and search URLs
     path('autocomplete/entities/', views.autocomplete_entities, name='autocomplete_entities'),
     path('search/', views.search_patents, name='search_patents'),
+    path('search/save/', views.save_search, name='save_search'),
+    path('search/delete/<int:search_id>/', views.delete_saved_search, name='delete_saved_search'),
 ]
