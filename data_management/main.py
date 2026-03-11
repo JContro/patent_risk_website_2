@@ -1129,6 +1129,64 @@ def read_xml_content(file_path, keywords=None):
         return []
 
 
+def process_xml_file_sequential(xml_file_path, keywords=None):
+    """
+    Process a single XML file and yield patents one at a time.
+    Uses iterparse for streaming XML parsing to avoid loading entire file into memory.
+    
+    Args:
+        xml_file_path: Path to the XML file
+        keywords: Optional keywords to filter patents
+        
+    Yields:
+        Patent dictionaries one at a time
+    """
+    try:
+        # Use iterparse for streaming XML parsing
+        # This doesn't load the entire tree into memory
+        context = ET.iterparse(xml_file_path, events=('end',))
+        
+        # Keep track of elements to clear for memory management
+        ancestors = {}
+        
+        for event, elem in context:
+            # Track ancestors for proper cleanup
+            if event == 'start':
+                ancestors[elem] = None  # Will be updated when we have parent info
+            elif event == 'end':
+                # Check if this is a patent element
+                if elem.tag in ['us-patent-application', 'us-patent-grant']:
+                    try:
+                        patent_data = extract_patent(elem)
+                        
+                        # Filter by keywords if provided
+                        if keywords and not contains_keywords(patent_data, keywords):
+                            # Clear element from memory
+                            elem.clear()
+                            continue
+                        
+                        yield patent_data
+                        
+                    except Exception as e:
+                        # Clear element from memory on error
+                        elem.clear()
+                        continue
+                    finally:
+                        # Always clear the element to free memory
+                        elem.clear()
+                
+                # Remove from ancestors if present
+                if elem in ancestors:
+                    del ancestors[elem]
+                    
+    except FileNotFoundError:
+        print(f"Error: File '{xml_file_path}' not found")
+    except ET.ParseError as e:
+        print(f"XML parse error in {xml_file_path}: {e}")
+    except Exception as e:
+        print(f"Error processing {xml_file_path}: {e}")
+
+
 def parse_xml_content(content, source_name, keywords=None):
     """
     Parse XML content and extract patents, optionally filtering by keywords.
@@ -1186,6 +1244,9 @@ def read_all_zips_sequential(data_dir, keywords=None, save_to_db=False):
     """
     Discover all .zip files in *data_dir* and extract patents from each
     sequentially (one at a time) to keep memory usage low.
+    
+    This version extracts each ZIP to a temp directory and processes files
+    one at a time to avoid running out of memory with large archives.
 
     Args:
         data_dir: Directory containing ZIP files
@@ -1196,6 +1257,9 @@ def read_all_zips_sequential(data_dir, keywords=None, save_to_db=False):
     the combined list of patent dicts and *source_files* is the list of
     ZIP paths that were processed.
     """
+    import tempfile
+    import shutil
+    
     zip_files = sorted(glob.glob(os.path.join(data_dir, '*.zip')))
     if not zip_files:
         print(f"⚠️  No ZIP files found in {data_dir}")
@@ -1205,6 +1269,7 @@ def read_all_zips_sequential(data_dir, keywords=None, save_to_db=False):
 
     all_patents = []
     processed_count = 0
+    total_patents_saved = 0
     
     # Use tqdm for progress tracking
     with tqdm(zip_files, desc="Processing ZIPs") as pbar:
@@ -1212,41 +1277,78 @@ def read_all_zips_sequential(data_dir, keywords=None, save_to_db=False):
             zip_name = os.path.basename(zip_path)
             pbar.set_postfix_str(zip_name)
             
-            # Create Search record for this ZIP file (for O(1) memory per patent)
-            search_obj = None
-            if save_to_db:
-                try:
-                    from accounts.models import Search
-                    zip_hash = search_hash(zip_name)
-                    search_obj, _ = Search.objects.get_or_create(
-                        search_hash=zip_hash,
-                        defaults={'search_query': f'Extracted from {zip_name}'}
-                    )
-                except Exception as e:
-                    print(f"    Warning: Failed to create search record: {e}")
-            
+            # Create temp directory for extraction
+            temp_dir = None
             try:
-                patents = read_xml_content(zip_path, keywords)
+                temp_dir = tempfile.mkdtemp(prefix='patent_extract_')
                 
-                # Always collect patents for searching, and optionally save to DB
-                all_patents.extend(patents)
+                # Extract ZIP to temp directory
+                print(f"\n  Extracting {zip_name} to temp directory...")
+                with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                    zip_ref.extractall(temp_dir)
                 
-                # Save patents to database if flag is set
-                if save_to_db and search_obj:
-                    for patent_data in patents:
-                        save_patent_with_search(patent_data, search_obj)
-                        # Let GC clean up patent_data after each iteration
+                # Find all XML files in the extracted directory
+                xml_files = sorted([
+                    os.path.join(root, f)
+                    for root, _, files in os.walk(temp_dir)
+                    for f in files if f.lower().endswith('.xml')
+                ])
+                
+                if not xml_files:
+                    print(f"  Warning: No XML files found in {zip_name}")
+                    continue
+                
+                print(f"  Found {len(xml_files)} XML files in {zip_name}")
+                
+                # Create Search record for this ZIP file
+                search_obj = None
+                if save_to_db:
+                    try:
+                        from accounts.models import Search
+                        zip_hash = search_hash(zip_name)
+                        search_obj, _ = Search.objects.get_or_create(
+                            search_hash=zip_hash,
+                            defaults={'search_query': f'Extracted from {zip_name}'}
+                        )
+                    except Exception as e:
+                        print(f"    Warning: Failed to create search record: {e}")
+                
+                # Process each XML file one at a time
+                file_count = 0
+                for xml_file in tqdm(xml_files, desc=f"  {zip_name[:20]}", leave=False):
+                    # Process file and yield patents one at a time
+                    for patent_data in process_xml_file_sequential(xml_file, keywords):
+                        # If save_to_db, save immediately and don't accumulate
+                        if save_to_db and search_obj:
+                            if save_patent_with_search(patent_data, search_obj):
+                                total_patents_saved += 1
+                        else:
+                            # Only keep in memory if not saving to DB
+                            all_patents.append(patent_data)
+                        
+                        file_count += 1
+                        
+                        # Force GC after each patent to prevent memory buildup
+                        gc.collect()
                 
                 processed_count += 1
-                
-                # Force garbage collection to free memory
-                gc.collect()
+                print(f"  ✓ Processed {file_count} patents from {zip_name}")
                 
             except Exception as e:
                 print(f"\n  ✗ {zip_name}: Error – {e}")
                 continue
+                
+            finally:
+                # Clean up temp directory
+                if temp_dir and os.path.exists(temp_dir):
+                    try:
+                        shutil.rmtree(temp_dir)
+                    except Exception as e:
+                        print(f"    Warning: Failed to clean up temp directory: {e}")
 
     print(f"\nTotal patents extracted from all ZIPs: {len(all_patents)}")
+    if save_to_db:
+        print(f"Total patents saved to database: {total_patents_saved}")
     
     return all_patents, zip_files
 
@@ -1433,7 +1535,6 @@ def main():
 
     # Parse command line arguments
     input_file = sys.argv[1]
-    output_file = "patents.json"
     keywords = None
     search_query = None
     entity_query = None
@@ -1550,29 +1651,87 @@ def main():
         print(f"Filtering patents containing keywords: {keywords}")
     print(f"Processing file: {input_file}")
 
-    all_patents = read_xml_content(input_file, keywords)
-
-    # Save to database if flag is set
-    if save_to_db and all_patents:
-        # Create Search record for this single file
-        try:
-            from accounts.models import Search
-            file_hash = search_hash(input_file)
-            search_obj, _ = Search.objects.get_or_create(
-                search_hash=file_hash,
-                defaults={'search_query': f'Extracted from {os.path.basename(input_file)}'}
-            )
-        except Exception as e:
-            print(f"    Warning: Failed to create search record: {e}")
-            search_obj = None
+    # Check if it's a ZIP file - use memory-efficient processing
+    if input_file.lower().endswith('.zip'):
+        import tempfile
+        import shutil
         
-        # Save patents one by one with O(1) memory per patent
-        print(f"Saving patents to database...")
-        saved_count = 0
-        for patent_data in all_patents:
-            if save_patent_with_search(patent_data, search_obj):
-                saved_count += 1
-        print(f"  ✓ Saved {saved_count} patents to database")
+        temp_dir = None
+        try:
+            temp_dir = tempfile.mkdtemp(prefix='patent_extract_')
+            
+            # Extract ZIP to temp directory
+            print(f"  Extracting to temp directory...")
+            with zipfile.ZipFile(input_file, 'r') as zip_ref:
+                zip_ref.extractall(temp_dir)
+            
+            # Find all XML files in the extracted directory
+            xml_files = sorted([
+                os.path.join(root, f)
+                for root, _, files in os.walk(temp_dir)
+                for f in files if f.lower().endswith('.xml')
+            ])
+            
+            if not xml_files:
+                print(f"\n⚠️ No XML files found in {input_file}")
+                sys.exit(0)
+            
+            print(f"  Found {len(xml_files)} XML files")
+            
+            # Create Search record for this file
+            search_obj = None
+            if save_to_db:
+                try:
+                    from accounts.models import Search
+                    file_hash = search_hash(input_file)
+                    search_obj, _ = Search.objects.get_or_create(
+                        search_hash=file_hash,
+                        defaults={'search_query': f'Extracted from {os.path.basename(input_file)}'}
+                    )
+                except Exception as e:
+                    print(f"    Warning: Failed to create search record: {e}")
+            
+            # Process each XML file one at a time
+            all_patents = []
+            saved_count = 0
+            total_count = 0
+            
+            for xml_file in tqdm(xml_files, desc="Processing XML files", leave=False):
+                for patent_data in process_xml_file_sequential(xml_file, keywords):
+                    # If saving to DB, do it immediately
+                    if save_to_db and search_obj:
+                        if save_patent_with_search(patent_data, search_obj):
+                            saved_count += 1
+                    else:
+                        all_patents.append(patent_data)
+                    
+                    total_count += 1
+                    gc.collect()
+            
+            print(f"  ✓ Processed {total_count} patents")
+            if save_to_db:
+                print(f"  ✓ Saved {saved_count} patents to database")
+            
+            # If no search query and saving to DB, we're done
+            if save_to_db and not (search_query or entity_query or cpc_query or start_date or end_date or document_type or jurisdiction):
+                return
+            
+            # If we have search queries but saved to DB, we need to reload for search
+            # For now, just return if saving to DB
+            if save_to_db:
+                print("\n✓ Extraction complete (search not supported with --save-db for single ZIP)")
+                return
+                
+        finally:
+            # Clean up temp directory
+            if temp_dir and os.path.exists(temp_dir):
+                try:
+                    shutil.rmtree(temp_dir)
+                except Exception as e:
+                    print(f"    Warning: Failed to clean up temp directory: {e}")
+    else:
+        # Regular XML file processing
+        all_patents = read_xml_content(input_file, keywords)
 
     if not all_patents:
         print(f"\n⚠️ No patents extracted from {input_file}")
