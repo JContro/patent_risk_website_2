@@ -1,292 +1,48 @@
-# Patent Data Processing Tool
+## Summary
 
-This tool extracts patent data from XML or ZIP files containing USPTO patent documents and provides powerful search capabilities.
+I've added error tracking and print statements to [`data_management/main.py`](data_management/main.py:1) to monitor parsing errors. Here's what was implemented:
 
-## Features
+### Changes Made:
 
-- Extract patents from XML files, ZIP archives, or directories containing multiple ZIP files
-- Filter patents during extraction using keywords
-- Search patents using boolean queries on:
-  - Patent content (title, abstract, claims, description)
-  - Entity names (inventors, applicants, assignees/owners)
-  - CPC classification codes with wildcard support
-- Combine multiple search criteria with AND logic
-- **Save patents to SQLite database** for persistent storage
-- **Save entities (inventors, applicants, assignees) to database**
-- **Attribute searches to patents** in the database
-- Progress tracking with tqdm (minimal console output)
+1. **Added global error counters** (lines 1189-1200):
+   - `xml_parse_errors` - XML parsing failures
+   - `extract_patent_errors` - Failures when extracting patent data
+   - `missing_root_tag_errors` - Unknown XML root tags
+   - `keyword_filter_errors` - Keyword filtering failures
+   - `other_errors` - Miscellaneous errors
 
-## Usage
+2. **Added helper functions**:
+   - [`reset_parsing_errors()`](data_management/main.py:1208) - Reset counters before each run
+   - [`print_parsing_errors()`](data_management/main.py:1217) - Print error summary
 
-```bash
-# Extract patents from a single file
-python main.py <xml_or_zip_file> [output.json] [--keywords kw1,kw2,...]
+3. **Added error tracking** in:
+   - [`parse_xml_content()`](data_management/main.py:1233) - For batch XML parsing
+   - [`process_xml_file_sequential()`](data_management/main.py:1134) - For streaming XML parsing
+   - [`read_xml_content()`](data_management/main.py:1086) - For ZIP file handling
 
-# Extract patents from all ZIP files in a directory (processed sequentially)
-python main.py <directory_path> [output.json] [--keywords kw1,kw2,...]
+4. **Error summary is printed** at the end of each ZIP file processing
 
-# Search existing patent JSON file
-python main.py <json_file> --search '<query>'
-python main.py <json_file> --search-entity '<query>'
-python main.py <json_file> --search-cpc '<pattern>'
+### Current Issue:
+
+The ZIP files (e.g., `ipg230620.zip` at 120MB) contain **multiple concatenated XML documents** (multiple patents in a single file). The current `iterparse` approach only processes the **first patent** and then fails with "junk after document element" error when it encounters the second patent's XML declaration.
+
+**Result**: Only 1 patent is extracted per ZIP file instead of all patents.
+
+### Test Output:
+```
+✓ Processed 1 patents
+✓ Saved 1 patents to database
+
+PARSING ERROR SUMMARY
+  XML Parse Errors:        1
+  Extract Patent Errors:   0
+  Missing Root Tag Errors: 0
+  Keyword Filter Errors:   0
+  Other Errors:            0
+  TOTAL ERRORS:            1
 ```
 
-## Database Storage (SQLite)
-
-The tool can save extracted patents to a SQLite database for persistent storage and search attribution.
-
-### Saving Patents to Database
-
-```bash
-# Extract from single ZIP file and save to database
-python main.py data/ipa260115_part1.zip --save-db
-
-# Extract from directory and save all patents to database
-python main.py data/ --save-db
-
-# Extract with keyword filtering and save to database
-python main.py data/ --keywords "artificial intelligence" --save-db
-```
-
-### Database Schema
-
-The database contains three main tables:
-
-**Patent Table:**
-| Field | Type | Description |
-|-------|------|-------------|
-| patent_id | Integer (PK) | Auto-generated primary key |
-| publication_number | String | US publication number (indexed) |
-| publication_date | Date | Publication date |
-| title | Text | Patent title |
-| abstract | Text | Patent abstract |
-| claims | JSON | Full claims data |
-| inventors | JSON | List of inventors |
-| applicants | JSON | List of applicants |
-| classifications_cpc_main | JSON | Main CPC classification |
-| classifications_cpc_further | JSON | Further CPC classifications |
-| classifications_ipcr | JSON | IPC classifications |
-| source_file | String | Source XML file |
-| extracted_at | DateTime | When patent was added |
-| entities | ManyToMany | Related entities |
-
-**Search Table:**
-| Field | Type | Description |
-|-------|------|-------------|
-| search_hash | String (PK) | SHA256 hash of query (indexed) |
-| search_query | Text | Original search query |
-| created_at | DateTime | When search was performed |
-| patents | ManyToMany | Related patents |
-| entities | ManyToMany | Related entities |
-
-**Entity Table:**
-| Field | Type | Description |
-|-------|------|-------------|
-| entity_id | Integer (PK) | Auto-generated primary key |
-| name | String | Entity name (indexed) |
-| entity_type | String | Type: inventor, applicant, or assignee (indexed) |
-| created_at | DateTime | When entity was added |
-| updated_at | DateTime | Last update timestamp |
-| patents | ManyToMany | Related patents |
-| searches | ManyToMany | Related searches |
-
-### Querying the Database
-
-```bash
-# Check how many patents are in the database
-docker compose exec web python -c "import os; os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings'); import django; django.setup(); from accounts.models import Patent; print(Patent.objects.count())"
-
-# Find patents by publication number
-docker compose exec web python -c "import os; os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings'); import django; django.setup(); from accounts.models import Patent; p = Patent.objects.filter(publication_number='US20260123456A1').first(); print(p.title if p else 'Not found')"
-
-# List all searches
-docker compose exec web python -c "import os; os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings'); import django; django.setup(); from accounts.models import Search; print([(s.search_hash[:12], s.search_query, s.patents.count()) for s in Search.objects.all()])"
-
-# Check how many entities are in the database
-docker compose exec web python -c "import os; os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings'); import django; django.setup(); from accounts.models import Entity; print('Total:', Entity.objects.count(), 'Inventors:', Entity.objects.filter(entity_type='inventor').count(), 'Applicants:', Entity.objects.filter(entity_type='applicant').count(), 'Assignees:', Entity.objects.filter(entity_type='assignee').count())"
-
-# Find entities by name
-docker compose exec web python -c "import os; os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings'); import django; django.setup(); from accounts.models import Entity; e = Entity.objects.filter(name='Microsoft').first(); print(e.name, e.entity_type, 'Patents:', e.patents.count(), 'Searches:', e.searches.count())"
-```
-
-## Command Line Options
-
-### --keywords
-Filter patents during extraction by keywords in title or abstract.
-
-Example:
-```bash
-python main.py data/ipa260115.zip --keywords "artificial intelligence,neural network"
-```
-
-### --save-db
-Save extracted patents and entities to the SQLite database. When used with extraction, patents are stored with full data including claims, inventors, applicants, and classifications.
-
-When used with search on patents already in the database, the search is attributed to matching patents and entities.
-
-Example:
-```bash
-# Extract and save to database (patents + entities)
-python main.py data/ipa260115.zip --save-db
-
-# Extract directory and save all patents
-python main.py data/ --save-db
-
-# Search and attribute to database (saves search + entities)
-python main.py patents.json --search "machine learning"
-
-# Extract with keyword filtering and save to database
-python main.py data/ --keywords "artificial intelligence" --save-db
-```
-
-### --search
-Boolean search on patent content (title, abstract, claims, description).
-
-Supports:
-- Quoted phrases: `"machine learning"`
-- AND/OR operators: `"machine learning" AND "neural networks"`
-- Parentheses for grouping: `("machine learning" AND "neural") OR "deep learning"`
-- Case-insensitive matching
-
-Example:
-```bash
-python main.py patents.json --search '"machine learning" AND "neural networks"'
-```
-
-### --search-entity
-Boolean search on entity names only (inventors, applicants, assignees/owners).
-
-Uses the same syntax as `--search`.
-
-Example:
-```bash
-python main.py patents.json --search-entity "Microsoft"
-python main.py patents.json --search-entity '"Samsung" OR "Apple"'
-```
-
-### --search-cpc
-Search by CPC (Cooperative Patent Classification) codes with wildcard support.
-
-- Comma-separated patterns (OR logic - matches if ANY pattern hits)
-- `*` matches any sequence of characters
-- Case-insensitive matching
-
-Example:
-```bash
-# All AI/ML patents
-python main.py patents.json --search-cpc "G06N*"
-
-# AI/ML or networking patents
-python main.py patents.json --search-cpc "G06N*,H04L*"
-
-# Specific subgroup
-python main.py patents.json --search-cpc "G06N5/043"
-```
-
-## Combining Search Flags
-
-All search flags can be combined with AND logic (a patent must match ALL criteria).
-
-Example:
-```bash
-# Microsoft AI patents
-python main.py patents.json --search-entity "Microsoft" --search-cpc "G06N*"
-
-# Google neural network patents with specific classification
-python main.py patents.json --search "neural" --search-entity "Google" --search-cpc "G06N*"
-
-# AI patents by specific companies in a technical field
-python main.py patents.json --search-entity '"IBM" OR "Microsoft"' --search-cpc "G06N*,G06F*"
-```
-
-## Directory Mode
-
-When a directory path is provided, all ZIP files in that directory are processed sequentially:
-
-```bash
-# Process all ZIP files in the data directory
-python main.py data/ --search "battery" --search-cpc "H01M*"
-```
-
-## Output
-
-When running without `--save-db`, the tool outputs minimal progress information:
-- Total patents extracted
-- Total distinct entities found
-
-When running with `--save-db`, data is saved directly to the database:
-- Patents are stored in the Patent table
-- Entities (inventors, applicants, assignees) are stored in the Entity table
-- Searches are stored in the Search table with links to matching patents and entities
-
-Use tqdm for progress tracking - no more verbose console output.
-
-## CPC Code Format
-
-CPC codes follow the standard format: `{section}{class}{subclass}{main_group}/{subgroup}`
-
-Examples:
-- `G06N5/043` - Artificial Intelligence / Neural networks / Pattern recognition
-- `H04L63/00` - Networking / Network security
-- `A63F13/67` - Games / Video games / Player interaction
-
-## Examples
-
-### Basic Extraction
-```bash
-# Extract all patents from a ZIP file
-python main.py data/ipa260115.zip
-
-# Extract with keyword filtering
-python main.py data/ipa260115.zip --keywords "AI,artificial intelligence"
-```
-
-### Content Search
-```bash
-# Simple term search
-python main.py patents.json --search "blockchain"
-
-# Boolean search
-python main.py patents.json --search '"machine learning" AND ("neural network" OR "deep learning")'
-```
-
-### Entity Search
-```bash
-# Find patents by specific company
-python main.py patents.json --search-entity "Google"
-
-# Find patents by multiple companies
-python main.py patents.json --search-entity '"Microsoft" OR "Apple"'
-
-# Find patents by specific inventor
-python main.py patents.json --search-entity "John Smith"
-```
-
-### CPC Classification Search
-```bash
-# All AI/ML patents
-python main.py patents.json --search-cpc "G06N*"
-
-# Multiple classifications
-python main.py patents.json --search-cpc "G06N*,G06F21*"
-
-# Specific subgroup
-python main.py patents.json --search-cpc "G06N5/043"
-```
-
-### Combined Searches
-```bash
-# AI patents by Microsoft
-python main.py patents.json --search-entity "Microsoft" --search-cpc "G06N*"
-
-# Neural network patents by Google
-python main.py patents.json --search "neural network" --search-entity "Google"
-
-# AI patents by major tech companies
-python main.py patents.json --search-cpc "G06N*" --search-entity '"Google" OR "Microsoft" OR "Apple" OR "Amazon" OR "Facebook"'
-```
-
-### Directory Processing
-```bash
-# Search across all ZIP files in a directory
-python main.py data/ --search "quantum computing" --search-cpc "G06N10*"
+To fully parse all patents from these large ZIP files, the code would need to either:
+1. Split the file by `<?xml` declarations before parsing (but this requires loading the entire file into memory, causing OOM)
+2. Use a streaming approach that can handle multiple XML documents
+3. Process smaller chunks of the file
