@@ -1,7 +1,15 @@
-*.pyc
-__pycache__
+# Ignore data files - they are not needed inside the container
+data_management/data/
+*.zip
+*.json
 db.sqlite3
-.git
-.gitignore
-.env
-*.md
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
