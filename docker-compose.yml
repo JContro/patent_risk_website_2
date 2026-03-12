@@ -5,6 +5,7 @@ services:
     command: python manage.py runserver 0.0.0.0:8080
     volumes:
       - .:/app
+      - ./data:/app/data
     ports:
       - "8080:8080"
     env_file:
