@@ -667,8 +667,8 @@
                                     <div class="claim-item">
                                         <div class="claim-number">Claim {{ forloop.counter }}</div>
                                         <div class="section-content">
-                                            {% if claim.claim_text %}
-                                                {{ claim.claim_text }}
+                                            {% if claim.text %}
+                                                {{ claim.text }}
                                             {% else %}
                                                 <span class="empty-value">Claim text not available</span>
                                             {% endif %}
