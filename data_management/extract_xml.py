@@ -5,14 +5,17 @@ Data Management Script for processing zipped XML patent files.
 This script extracts patent data from USPTO XML files and maps it to the Patent model schema.
 
 Usage in Docker:
-    docker compose exec web python data_management/extract_xml.py
+    docker compose exec -e DJANGO_SETTINGS_MODULE=config.settings web python data_management/extract_xml.py
     
     # Or with options:
-    docker compose exec web python data_management/extract_xml.py --limit 10
-    docker compose exec web python data_management/extract_xml.py --zip ipg220215.zip
+    docker compose exec -e DJANGO_SETTINGS_MODULE=config.settings web python data_management/extract_xml.py --limit 10
+    docker compose exec -e DJANGO_SETTINGS_MODULE=config.settings web python data_management/extract_xml.py --zip ipg220215.zip
     
     # Save to database:
-    docker compose exec web python data_management/extract_xml.py --save --limit 100
+    docker compose exec -e DJANGO_SETTINGS_MODULE=config.settings web python data_management/extract_xml.py --save --limit 100
+    
+    # Filter by keywords (AI/ML patents):
+    docker compose exec -e DJANGO_SETTINGS_MODULE=config.settings web python data_management/extract_xml.py --save --keywords
 """
 
 import os
@@ -40,6 +43,185 @@ from accounts.models import Patent
 
 # Data directory - inside data_management folder
 DATA_DIR = Path(__file__).parent / "data"
+
+
+# AI/ML Keywords for filtering patents
+AI_ML_KEYWORDS = [
+    "artificial intelligence",
+    "machine learning",
+    "deep learning",
+    "neural network",
+    "neural networks",
+    "convolutional neural network",
+    "CNN",
+    "recurrent neural network",
+    "RNN",
+    "long short-term memory",
+    "LSTM",
+    "generative adversarial network",
+    "GAN",
+    "transformer model",
+    "attention mechanism",
+    "self-attention",
+    "pre-trained model",
+    "foundation model",
+    "large language model",
+    "LLM",
+    "natural language processing",
+    "NLP",
+    "natural language understanding",
+    "NLU",
+    "natural language generation",
+    "NLG",
+    "computer vision",
+    "image recognition",
+    "object detection",
+    "object recognition",
+    "image segmentation",
+    "semantic segmentation",
+    "instance segmentation",
+    "face recognition",
+    "facial recognition",
+    "pattern recognition",
+    "image classification",
+    "feature extraction",
+    "feature matching",
+    "edge detection",
+    "object tracking",
+    "pose estimation",
+    "image generation",
+    "style transfer",
+    "image reconstruction",
+    "super-resolution",
+    "optical character recognition",
+    "OCR",
+    "supervised learning",
+    "unsupervised learning",
+    "semi-supervised learning",
+    "self-supervised learning",
+    "reinforcement learning",
+    "transfer learning",
+    "few-shot learning",
+    "zero-shot learning",
+    "meta-learning",
+    "ensemble learning",
+    "model training",
+    "model optimization",
+    "hyperparameter tuning",
+    "gradient descent",
+    "backpropagation",
+    "batch normalization",
+    "dropout",
+    "data augmentation",
+    "overfitting",
+    "underfitting",
+    "bias-variance tradeoff",
+    "data mining",
+    "data preprocessing",
+    "data normalization",
+    "data transformation",
+    "feature engineering",
+    "feature selection",
+    "dimensionality reduction",
+    "principal component analysis",
+    "PCA",
+    "t-SNE",
+    "autoencoder",
+    "latent representation",
+    "embedding",
+    "word embedding",
+    "vector representation",
+    "one-hot encoding",
+    "tokenization",
+    "autonomous vehicle",
+    "autonomous robot",
+    "robotics",
+    "robot navigation",
+    "path planning",
+    "SLAM",
+    "simultaneous localization and mapping",
+    "motion planning",
+    "human-robot interaction",
+    "robot control",
+    "adaptive control",
+    "speech recognition",
+    "speech synthesis",
+    "text-to-speech",
+    "TTS",
+    "voice recognition",
+    "speaker identification",
+    "speaker verification",
+    "speech translation",
+    "machine translation",
+    "language model",
+    "bidirectional",
+    "encoder-decoder",
+    "seq2seq",
+    "wordpiece",
+    "subword tokenization",
+    "medical imaging",
+    "diagnostic imaging",
+    "clinical decision support",
+    "drug discovery",
+    "molecular modeling",
+    "financial forecasting",
+    "fraud detection",
+    "anomaly detection",
+    "recommendation system",
+    "predictive maintenance",
+    "quality control",
+    "industrial inspection",
+    "smart manufacturing",
+    "fintech",
+    "autonomous driving",
+    "ADAS",
+    "advanced driver assistance",
+    "model compression",
+    "model quantization",
+    "knowledge distillation",
+    "neural architecture search",
+    "NAS",
+    "edge computing",
+    "federated learning",
+    "distributed training",
+    "parallel computing",
+    "GPU optimization",
+    "TPU",
+    "inference optimization",
+    "model serving",
+    "AI accelerator",
+    "attention model",
+    "transformer",
+    "BERT",
+    "GPT",
+    "encoder",
+    "decoder",
+    "attention head",
+    "multi-head attention",
+    "residual connection",
+    "skip connection",
+    "layer normalization",
+    "softmax",
+    "logit",
+    "activation function",
+    "ReLU",
+    "sigmoid",
+    "tanh",
+    "loss function",
+    "cross-entropy",
+    "optimizer",
+    "Adam",
+    "SGD",
+    "differential privacy",
+    "privacy-preserving",
+    "explainable AI",
+    "XAI",
+    "interpretable AI",
+    "algorithmic fairness",
+    "bias detection",
+    "AI ethics",
+    "transparent AI"
+]
 
 
 def find_zipped_xml_files(data_dir: Path) -> list[Path]:
@@ -71,11 +253,52 @@ def parse_date(date_str: Optional[str]) -> Optional[datetime]:
 
 
 def extract_text(element: Optional[ET.Element]) -> Optional[str]:
-    """Extract text from XML element safely."""
+    """
+    Extract all text content from an element and its children.
+    This improved version handles nested elements correctly.
+    """
     if element is None:
         return None
-    text = element.text
-    return text.strip() if text else None
+    text = element.text or ""
+    for child in element:
+        text += extract_text(child) or ""
+        text += child.tail or ""
+    return text.strip() if text.strip() else None
+
+
+def contains_keywords(patent_data: dict, keywords: list[str]) -> bool:
+    """
+    Check if patent contains any of the keywords (case-insensitive) in title, abstract, or claims.
+    Returns True if any keyword is found in text fields.
+    """
+    if not keywords:
+        return True
+
+    text_fields = []
+
+    # Title
+    if "title" in patent_data and patent_data["title"]:
+        text_fields.append(patent_data["title"])
+
+    # Abstract
+    if "abstract" in patent_data and patent_data["abstract"]:
+        text_fields.append(patent_data["abstract"])
+
+    # Claims text
+    if "claims" in patent_data and patent_data["claims"]:
+        for claim in patent_data["claims"]:
+            if claim and "text" in claim and claim["text"]:
+                text_fields.append(claim["text"])
+
+    # Combine all text
+    combined_text = " ".join(text_fields).lower()
+
+    # Check each keyword
+    for keyword in keywords:
+        if keyword.lower() in combined_text:
+            return True
+
+    return False
 
 
 def get_doc_id_text(element: Optional[ET.Element]) -> Optional[str]:
@@ -439,7 +662,8 @@ def extract_all_patents(
     data_dir: Path = DATA_DIR,
     zip_name: str = None,
     limit: int = None,
-    save_to_db: bool = False
+    save_to_db: bool = False,
+    filter_keywords: bool = False
 ) -> list[dict]:
     """
     Main function to extract all patent data from zipped XML files.
@@ -449,14 +673,20 @@ def extract_all_patents(
         zip_name: Specific zip file to process (None for all)
         limit: Maximum number of patents to process per file
         save_to_db: Whether to save extracted patents to database
+        filter_keywords: If True, only save patents matching AI/ML keywords
 
     Returns:
         List of all parsed patent data
     """
+    keywords = AI_ML_KEYWORDS if filter_keywords else None
+
     print(f"\n=== Starting Patent Extraction ===")
     print(f"Data directory: {data_dir}")
     if save_to_db:
-        print(f"Mode: Extract and save to database")
+        if filter_keywords:
+            print(f"Mode: Extract, filter by AI/ML keywords, and save to database")
+        else:
+            print(f"Mode: Extract and save to database")
     else:
         print(f"Mode: Extract only (no database save)")
     print()
@@ -474,7 +704,17 @@ def extract_all_patents(
     for zip_file in zip_files:
         print(f"\nProcessing: {zip_file.name}")
         results = process_zipped_xml(zip_file, limit=limit)
-        all_results.extend(results)
+
+        # Filter by keywords if requested
+        if keywords:
+            filtered_results = [
+                r for r in results if contains_keywords(r, keywords)]
+            print(
+                f"  Matched {len(filtered_results)}/{len(results)} patents with AI/ML keywords")
+            all_results.extend(filtered_results)
+        else:
+            all_results.extend(results)
+
         print(f"  Total extracted so far: {len(all_results)}")
 
     print(f"\n=== Extraction Complete ===")
@@ -602,6 +842,11 @@ if __name__ == "__main__":
         action="store_true",
         help="Save extracted patents to the SQLite database"
     )
+    parser.add_argument(
+        "--keywords",
+        action="store_true",
+        help="Filter patents by AI/ML keywords (only works with --save)"
+    )
 
     args = parser.parse_args()
 
@@ -620,7 +865,8 @@ if __name__ == "__main__":
             data_dir,
             zip_name=args.zip,
             limit=args.limit,
-            save_to_db=args.save
+            save_to_db=args.save,
+            filter_keywords=args.keywords
         )
 
         # Print sample results
