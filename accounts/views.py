@@ -359,11 +359,11 @@ def dashboard(request):
             for risk in parsed_risks:
                 risk_type = risk.get('risk', 'Unknown')
                 risk_counts[risk_type] += 1
-                
-                # Time series - use analysis creation date
-                if analysis.created_at:
-                    month_key = analysis.created_at.strftime('%Y-%m')
-                    risks_by_month[month_key] += 1
+            
+            # Time series - use patent publication date, count patents with risks (not individual risks)
+            if patent.publication_date:
+                month_key = patent.publication_date.strftime('%Y-%m')
+                risks_by_month[month_key] += 1
             
             # Add patent to list with its risks
             patent_risk_data.append({

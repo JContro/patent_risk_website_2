@@ -620,8 +620,12 @@
         const riskValues = {{ risk_values_json|safe }};
         
         if (riskLabels.length > 0 && riskValues.length > 0) {
+            // Truncate long risk labels for display (hover shows full name)
+            const truncatedLabels = riskLabels.map(label =>
+                label.length > 20 ? label.substring(0, 17) + '...' : label
+            );
             const riskTrace = {
-                x: riskLabels,
+                x: truncatedLabels,
                 y: riskValues,
                 type: 'bar',
                 marker: {
@@ -689,7 +693,7 @@
                     automargin: true
                 },
                 yaxis: {
-                    title: 'Number of Risks',
+                    title: 'Patents with Risks',
                     automargin: true
                 },
                 paper_bgcolor: 'rgba(0,0,0,0)',
