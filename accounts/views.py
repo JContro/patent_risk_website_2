@@ -220,14 +220,32 @@ def verify_email(request, uidb64, token):
 
 def custom_login(request):
     if request.method == 'POST':
-        form = AuthenticationForm(request, data=request.POST)
-        if form.is_valid():
-            user = form.get_user()
+        username = request.POST.get('username')
+        password = request.POST.get('password')
+        
+        # Try to find user by username first, then by email
+        user = None
+        user_obj = None
+        try:
+            # Check if it's an email address
+            if '@' in username:
+                user_obj = User.objects.get(email=username)
+                user = authenticate(request, username=user_obj.username, password=password)
+            else:
+                user = authenticate(request, username=username, password=password)
+        except User.DoesNotExist:
+            pass
+        
+        if user is not None:
             if not user.is_email_verified:
                 messages.error(request, 'Please verify your email before logging in.')
                 return redirect('login')
             login(request, user)
             return redirect(settings.LOGIN_REDIRECT_URL)
+        
+        # Authentication failed - show error
+        messages.error(request, 'Invalid username or password.')
+        return redirect('login')
     else:
         form = AuthenticationForm()
     return render(request, 'accounts/login.html', {'form': form})
