@@ -22,13 +22,18 @@ def analyse_patent_with_openrouter(patent, prompt_template):
     if not api_key:
         raise ValueError("OpenRouter API key not configured. Please set OPENROUTER_API_KEY in .env")
     
-    # Get the risks list from settings
-    risks_list = getattr(settings, 'EU_AI_RISKS', [])
-    if not risks_list:
+    # Get the structured risks list from settings
+    risks_structure = getattr(settings, 'EU_AI_RISKS_STRUCTURE', {})
+    if not risks_structure:
         raise ValueError("EU AI Risks not configured. Please check settings.")
-    
-    # Format the risks list as a string
-    risks_str = "\n".join(f"- {risk}" for risk in risks_list)
+
+    # Format the risks list as a string with category headers
+    risks_str = ""
+    for category, risks in risks_structure.items():
+        risks_str += f"\n{category}:\n"
+        for risk in risks:
+            risks_str += f"  - {risk}\n"
+    risks_str = risks_str.strip()
     
     # Build patent claims from the patent object
     patent_claims = _build_patent_claims(patent)

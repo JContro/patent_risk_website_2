@@ -127,51 +127,120 @@ INSTRUCTIONS:
 2. The response must be a JSON array of objects with exactly these keys:
    - "snippet": The exact text from the patent that contains the risk (string)
    - "risk": The exact risk category from the list above (string)
+   - "explanation": A brief explanation of why this is a risk (1-2 sentences max)
    - "confidence_score": A float between 0 and 1 (number, not string)
 3. If no risks are found, output an empty array: []
-4. Do not include any keys other than "snippet", "risk", and "confidence_score"
-5. Do not add any commentary or explanation - output ONLY the JSON array''')
+4. Do not include any keys other than "snippet", "risk", "explanation", and "confidence_score"
+5. Do not add any commentary or explanation outside the JSON - output ONLY the JSON array''')
 
-# EU AI Act Risks List
+# EU AI Act Risks - Structured JSON format
+# Categories: Unacceptable, High Risk, General High Risks, Human Rights, Online Manipulation
+EU_AI_RISKS_STRUCTURE = {
+    "Unacceptable": [
+        "harmful AI-based manipulation and deception",
+        "harmful AI-based exploitation of vulnerabilities",
+        "social scoring",
+        "individual criminal offence risk assessment or prediction",
+        "untargeted scraping of the internet or CCTV material to create or expand facial recognition databases",
+        "emotion recognition in workplaces and education institutions",
+        "biometric categorisation to deduce certain protected characteristics",
+        "real-time remote biometric identification for law enforcement purposes in publicly accessible spaces"
+    ],
+    "High Risk": [
+        "AI safety components in critical infrastructures (e.g. transport), the failure of which could put the life and health of citizens at risk",
+        "AI solutions used in education institutions, that may determine the access to education and course of someones professional life (e.g. scoring of exams)",
+        "AI-based safety components of products (e.g. AI application in robot-assisted surgery)",
+        "AI tools for employment, management of workers and access to self-employment (e.g. CV-sorting software for recruitment)",
+        "Certain AI use-cases utilised to give access to essential private and public services (e.g. credit scoring denying citizens opportunity to obtain a loan)",
+        "AI systems used for remote biometric identification, emotion recognition and biometric categorisation (e.g AI system to retroactively identify a shoplifter)",
+        "AI use-cases in law enforcement that may interfere with peoples fundamental rights (e.g. evaluation of the reliability of evidence)",
+        "AI use-cases in migration, asylum and border control management (e.g. automated examination of visa applications)",
+        "AI solutions used in the administration of justice and democratic processes (e.g. AI solutions to prepare court rulings)"
+    ],
+    "General High Risks": [
+        "risk to health",
+        "risk to safety",
+        "risk to fundamental rights",
+        "risks associated with a need for transparency around the use of AI, humans are informed when necessary to preserve trust"
+    ],
+    "Human Rights": [
+        "human right to life",
+        "human right to freedom from torture (and inhuman or degrading treatment or punishment)",
+        "human right to freedom from slavery and forced labour",
+        "human right to liberty and security (lawful arrest or detention, informed why arrested in language they understand)",
+        "human right to a fair trial (assumed innocent)",
+        "human right to respect for private and family life",
+        "human right to freedom of thought, conscience and religion",
+        "human right to freedom of expression",
+        "human right to freedom of assembly and association (protest)",
+        "human right to marry",
+        "human right to an effective remedy (right to legal remedy by person whose rights have been violated)",
+        "human right to freedom of discrimination"
+    ],
+    "Online Manipulation": [
+        # Vulnerabilities - Ontological: Universal human traits making everyone susceptible to influence (cognitive biases, emotional vulnerabilities, habitual behaviors, loss aversion, sunk cost fallacy)",
+        "Online Manipulation: Ontological Vulnerabilities - Universal human traits making everyone susceptible to influence (cognitive biases, emotional vulnerabilities, habitual behaviors, loss aversion, sunk cost fallacy)",
+        # Vulnerabilities - Contingent Structural: Susceptibilities from social position or systemic disadvantages (demographic targeting, economic hardship, polarization, social isolation, historical trauma, educational disparities)",
+        "Online Manipulation: Contingent-Structural Vulnerabilities - Susceptibilities from social position or systemic disadvantages (demographic targeting, economic hardship, polarization, social isolation, historical trauma, educational disparities)",
+        # Vulnerabilities - Contingent Individual: Personal traits unique to individuals (behavioral profiling, preference exploitation, life event targeting, psychological inference, personality assessment, addiction tendencies)",
+        "Online Manipulation: Contingent-Individual Vulnerabilities - Personal traits unique to individuals (behavioral profiling, preference exploitation, life event targeting, psychological inference, personality assessment, addiction tendencies)",
+        # Characteristics - Hidden/Covert Influence: Influence operating outside conscious awareness (unaware influence, no transparency, obscured mechanisms, concealed sources, misrepresented motivations)",
+        "Online Manipulation: Hidden/Covert Influence - Influence operating outside conscious awareness (unaware influence, no transparency, obscured mechanisms, concealed sources, misrepresented motivations)",
+        # Characteristics - Exploitation of Vulnerabilities: Deliberate targeting of decision-making weaknesses (cognitive biases, emotional states, impulse control, creating wants, addictive behaviors)",
+        "Online Manipulation: Exploitation of Vulnerabilities - Deliberate targeting of decision-making weaknesses (cognitive biases, emotional states, impulse control, creating wants, addictive behaviors)",
+        # Characteristics - Targeted Delivery: Influence directed at specific individuals (personalized messaging, microtargeting, individual adaptation, psychographic segmentation, real-time personalization)",
+        "Online Manipulation: Targeted Delivery - Influence directed at specific individuals (personalized messaging, microtargeting, individual adaptation, psychographic segmentation, real-time personalization)",
+        # Context - Commercial/Consumer: Manipulation driving purchasing decisions (emotional targeting, personalized pricing, urgency tactics, insecurity exploitation, predatory advertising, subliminal techniques)",
+        "Online Manipulation: Commercial/Consumer Context - Manipulation driving purchasing decisions (emotional targeting, personalized pricing, urgency tactics, insecurity exploitation, predatory advertising, subliminal techniques)",
+        # Context - Workplace/Labor: Manipulation of workers through algorithmic management (push notifications, gamification, psychological goal-setting, automatic queuing, misleading metrics, behavioral nudges)",
+        "Online Manipulation: Workplace/Labor Context - Manipulation of workers through algorithmic management (push notifications, gamification, psychological goal-setting, automatic queuing, misleading metrics, behavioral nudges)",
+        # Context - Political: Manipulation influencing voting, public opinion, or political processes (voter psychographic targeting, emotional political advertising, disinformation, microtargeted messaging, ideological bias exploitation, division amplification)",
+        "Online Manipulation: Political Context - Manipulation influencing voting, public opinion, or political processes (voter psychographic targeting, emotional political advertising, disinformation, microtargeted messaging, ideological bias exploitation, division amplification)"
+    ]
+}
+
+# Flat list for backwards compatibility (format: "Category: description")
 EU_AI_RISKS = [
-    # Unacceptable risks p1-p8
-    'Unacceptable risk p1 (harmful AI-based manipulation and deception)',
-    'Unacceptable risk p2 (harmful AI-based exploitation of vulnerabilities)',
-    'Unacceptable risk p3 (social scoring)',
-    'Unacceptable risk p4 (individual criminal offence risk assessment or prediction)',
-    'Unacceptable risk p5 (untargeted scraping of the internet or CCTV material to create or expand facial recognition databases)',
-    'Unacceptable risk p6 (emotion recognition in workplaces and education institutions)',
-    'Unacceptable risk p7 (biometric categorisation to deduce certain protected characteristics)',
-    'Unacceptable risk p8 (real-time remote biometric identification for law enforcement purposes in publicly accessible spaces)',
-
-    # High risks u1-u9
-    'High risk u1 (AI safety components in critical infrastructures (e.g. transport), the failure of which could put the life and health of citizens at risk)',
-    'High risk u2 (AI solutions used in education institutions, that may determine the access to education and course of someones professional life (e.g. scoring of exams))',
-    'High risk u3 (AI-based safety components of products (e.g. AI application in robot-assisted surgery))',
-    'High risk u4 (AI tools for employment, management of workers and access to self-employment (e.g. CV-sorting software for recruitment))',
-    'High risk u5 (Certain AI use-cases utilised to give access to essential private and public services (e.g. credit scoring denying citizens opportunity to obtain a loan))',
-    'High risk u6 (AI systems used for remote biometric identification, emotion recognition and biometric categorisation (e.g AI system to retroactively identify a shoplifter))',
-    'High risk u7 (AI use-cases in law enforcement that may interfere with peoples fundamental rights (e.g. evaluation of the reliability of evidence))',
-    'High risk u8 (AI use-cases in migration, asylum and border control management (e.g. automated examination of visa applications))',
-    'High risk u9 (AI solutions used in the administration of justice and democratic processes (e.g. AI solutions to prepare court rulings))',
-
-    # General high risks
-    'High risk health (risk to health)',
-    'High risk safety (risk to safety)',
-    'High risk fundamental rights (risk to fundamental rights)',
-    'Transparency risk (risks associated with a need for transparency around the use of AI, humans are informed when necessary to preserve trust)',
-
-    # Human rights
-    'Human right to life',
-    'Human right to freedom from torture (and inhuman or degrading treatment or punishment)',
-    'Human right to freedom from slavery and forced labour',
-    'Human right to liberty and security (lawful arrest or detention, informed why arrested in language they understand)',
-    'Human right to a fair trial (assumed innocent)',
-    'Human right to respect for private and family life',
-    'Human right to freedom of thought, conscience and religion',
-    'Human right to freedom of expression',
-    'Human right to freedom of assembly and association (protest)',
-    'Human right to marry',
-    'Human right to an effective remedy (right to legal remedy by person whose rights have been violated)',
-    'Human right to freedom of discrimination',
+    "Unacceptable: harmful AI-based manipulation and deception",
+    "Unacceptable: harmful AI-based exploitation of vulnerabilities",
+    "Unacceptable: social scoring",
+    "Unacceptable: individual criminal offence risk assessment or prediction",
+    "Unacceptable: untargeted scraping of the internet or CCTV material to create or expand facial recognition databases",
+    "Unacceptable: emotion recognition in workplaces and education institutions",
+    "Unacceptable: biometric categorisation to deduce certain protected characteristics",
+    "Unacceptable: real-time remote biometric identification for law enforcement purposes in publicly accessible spaces",
+    "High Risk: AI safety components in critical infrastructures (e.g. transport), the failure of which could put the life and health of citizens at risk",
+    "High Risk: AI solutions used in education institutions, that may determine the access to education and course of someones professional life (e.g. scoring of exams)",
+    "High Risk: AI-based safety components of products (e.g. AI application in robot-assisted surgery)",
+    "High Risk: AI tools for employment, management of workers and access to self-employment (e.g. CV-sorting software for recruitment)",
+    "High Risk: Certain AI use-cases utilised to give access to essential private and public services (e.g. credit scoring denying citizens opportunity to obtain a loan)",
+    "High Risk: AI systems used for remote biometric identification, emotion recognition and biometric categorisation (e.g AI system to retroactively identify a shoplifter)",
+    "High Risk: AI use-cases in law enforcement that may interfere with peoples fundamental rights (e.g. evaluation of the reliability of evidence)",
+    "High Risk: AI use-cases in migration, asylum and border control management (e.g. automated examination of visa applications)",
+    "High Risk: AI solutions used in the administration of justice and democratic processes (e.g. AI solutions to prepare court rulings)",
+    "General High Risks: risk to health",
+    "General High Risks: risk to safety",
+    "General High Risks: risk to fundamental rights",
+    "General High Risks: risks associated with a need for transparency around the use of AI, humans are informed when necessary to preserve trust",
+    "Human Rights: human right to life",
+    "Human Rights: human right to freedom from torture (and inhuman or degrading treatment or punishment)",
+    "Human Rights: human right to freedom from slavery and forced labour",
+    "Human Rights: human right to liberty and security (lawful arrest or detention, informed why arrested in language they understand)",
+    "Human Rights: human right to a fair trial (assumed innocent)",
+    "Human Rights: human right to respect for private and family life",
+    "Human Rights: human right to freedom of thought, conscience and religion",
+    "Human Rights: human right to freedom of expression",
+    "Human Rights: human right to freedom of assembly and association (protest)",
+    "Human Rights: human right to marry",
+    "Human Rights: human right to an effective remedy (right to legal remedy by person whose rights have been violated)",
+    "Human Rights: human right to freedom of discrimination",
+    "Online Manipulation: Ontological Vulnerabilities - Universal human traits making everyone susceptible to influence (cognitive biases, emotional vulnerabilities, habitual behaviors, loss aversion, sunk cost fallacy)",
+    "Online Manipulation: Contingent-Structural Vulnerabilities - Susceptibilities from social position or systemic disadvantages (demographic targeting, economic hardship, polarization, social isolation, historical trauma, educational disparities)",
+    "Online Manipulation: Contingent-Individual Vulnerabilities - Personal traits unique to individuals (behavioral profiling, preference exploitation, life event targeting, psychological inference, personality assessment, addiction tendencies)",
+    "Online Manipulation: Hidden/Covert Influence - Influence operating outside conscious awareness (unaware influence, no transparency, obscured mechanisms, concealed sources, misrepresented motivations)",
+    "Online Manipulation: Exploitation of Vulnerabilities - Deliberate targeting of decision-making weaknesses (cognitive biases, emotional states, impulse control, creating wants, addictive behaviors)",
+    "Online Manipulation: Targeted Delivery - Influence directed at specific individuals (personalized messaging, microtargeting, individual adaptation, psychographic segmentation, real-time personalization)",
+    "Online Manipulation: Commercial/Consumer Context - Manipulation driving purchasing decisions (emotional targeting, personalized pricing, urgency tactics, insecurity exploitation, predatory advertising, subliminal techniques)",
+    "Online Manipulation: Workplace/Labor Context - Manipulation of workers through algorithmic management (push notifications, gamification, psychological goal-setting, automatic queuing, misleading metrics, behavioral nudges)",
+    "Online Manipulation: Political Context - Manipulation influencing voting, public opinion, or political processes (voter psychographic targeting, emotional political advertising, disinformation, microtargeted messaging, ideological bias exploitation, division amplification)",
 ]

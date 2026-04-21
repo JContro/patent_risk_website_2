@@ -188,6 +188,31 @@
             color: white;
         }
 
+        .cache-status {
+            font-size: 0.85rem;
+            color: #666;
+            margin-right: 10px;
+        }
+
+        .recalculate-btn {
+            padding: 0.5rem 1rem;
+            background: #ff9500;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.9rem;
+        }
+
+        .recalculate-btn:hover {
+            background: #e68600;
+        }
+
+        .recalculate-btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
         /* Stats Grid */
         .stats-grid {
             display: grid;
@@ -484,6 +509,49 @@
             <a href="{% url 'dashboard' %}" class="view-all-btn">View All</a>
         </div>
 
+        <!-- Cache Status and Recalculate -->
+        <div class="search-selector" style="margin-top: 10px;">
+            <span class="cache-status">{{ cache_status|default:"No cache" }}</span>
+            <button onclick="recalculateCache()" class="recalculate-btn" id="recalculate-btn">Recalculate Cache</button>
+        </div>
+
+        <script>
+        function recalculateCache() {
+            const btn = document.getElementById('recalculate-btn');
+            btn.disabled = true;
+            btn.textContent = 'Recalculating...';
+            
+            const searchId = new URLSearchParams(window.location.search).get('search_id');
+            const url = searchId
+                ? '{% url "recalculate_cache" %}?search_id=' + searchId
+                : '{% url "recalculate_cache" %}';
+            
+            fetch(url, {
+                method: 'POST',
+                headers: {
+                    'X-CSRFToken': '{{ csrf_token }}',
+                    'Content-Type': 'application/json',
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    alert('Cache updated successfully!');
+                    location.reload();
+                } else {
+                    alert('Error: ' + data.error);
+                }
+                btn.disabled = false;
+                btn.textContent = 'Recalculate Cache';
+            })
+            .catch(error => {
+                alert('Error: ' + error);
+                btn.disabled = false;
+                btn.textContent = 'Recalculate Cache';
+            });
+        }
+        </script>
+
         {% if total_patents > 0 %}
         <!-- Stats Grid -->
         <div class="stats-grid">
@@ -556,14 +624,14 @@
                     {% for item in patent_risk_data %}
                     <tr>
                         <td>
-                            <a href="{% url 'patent_detail' item.patent.patent_id %}" class="patent-number">
-                                {{ item.patent.publication_number }}
+                            <a href="{% url 'patent_detail' item.patent_id %}" class="patent-number">
+                                {{ item.publication_number }}
                             </a>
                         </td>
-                        <td class="patent-title" title="{{ item.patent.title }}">
-                            {{ item.patent.title|truncatechars:50 }}
+                        <td class="patent-title" title="{{ item.title }}">
+                            {{ item.title|truncatechars:50 }}
                         </td>
-                        <td>{{ item.patent.publication_date|default:"N/A" }}</td>
+                        <td>{{ item.publication_date|default:"N/A" }}</td>
                         <td>
                             {% if item.has_risks %}
                                 {% for risk in item.risks|slice:":3" %}

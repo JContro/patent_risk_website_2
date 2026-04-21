@@ -17,7 +17,7 @@ from urllib.parse import urlencode
 import uuid
 import threading
 
-from .models import User, Patent, Entity, Analysis, SavedSearch
+from .models import User, Patent, Entity, Analysis, SavedSearch, DashboardCache
 from .forms import RegistrationForm
 from django.db.models import Q
 from django.conf import settings
@@ -102,6 +102,7 @@ def _parse_json_response(raw_response):
             normalized_risks.append({
                 'snippet': str(snippet),
                 'risk': str(risk),
+                'explanation': str(item.get('explanation', '')),
                 'confidence_score': confidence
             })
     
@@ -253,7 +254,9 @@ def custom_login(request):
 
 @login_required
 def dashboard(request):
-    """Dashboard with tabs for dashboard, search, and company profile."""
+    """Dashboard with tabs for dashboard, search, and company profile.
+    Uses cached data for performance, with fallback to full computation.
+    """
     from collections import Counter
     from django.db.models import Count
     import plotly.utils
@@ -264,9 +267,136 @@ def dashboard(request):
     # Get the selected saved search from query params
     selected_search_id = request.GET.get('search_id')
     
+    # Try to get cached data first
+    cache = None
+    selected_search = None
+    if selected_search_id:
+        try:
+            selected_search = SavedSearch.objects.get(id=selected_search_id, user=request.user)
+            cache = DashboardCache.objects.filter(user=request.user, saved_search=selected_search).first()
+        except SavedSearch.DoesNotExist:
+            selected_search = None
+    else:
+        cache = DashboardCache.objects.filter(user=request.user, saved_search=None, is_global=True).first()
+    
+    # If cache exists, use it for fast rendering
+    if cache:
+        cache_data = cache.cache_data
+        total_patents = cache.patent_count
+        patents_with_risks = cache.risks_count
+        patents_with_military = cache.patents_with_military
+        patents_with_surveillance = cache.patents_with_surveillance
+        patents_with_online_manipulation = cache.patents_with_online_manipulation
+        
+        # Get total patents in search (need to recalculate for this)
+        total_patents_in_search = _get_total_patents_for_search(selected_search, selected_search_id)
+        
+        # Calculate percentages
+        if total_patents > 0:
+            military_percentage = round((patents_with_military / total_patents) * 100, 1)
+            surveillance_percentage = round((patents_with_surveillance / total_patents) * 100, 1)
+            online_manipulation_percentage = round((patents_with_online_manipulation / total_patents) * 100, 1)
+            risks_percentage = round((patents_with_risks / total_patents) * 100, 1)
+        else:
+            military_percentage = 0
+            surveillance_percentage = 0
+            online_manipulation_percentage = 0
+            risks_percentage = 0
+        
+        # Build display names for searches
+        searches_with_display = []
+        for search in saved_searches:
+            if search.name:
+                display_name = search.name
+            elif search.applicant:
+                display_name = f"Applicant: {search.applicant}"
+            elif search.assignee:
+                display_name = f"Assignee: {search.assignee}"
+            elif search.inventor:
+                display_name = f"Inventor: {search.inventor}"
+            elif search.query:
+                display_name = f"Search: {search.query}"
+            else:
+                display_name = f"Search #{search.id}"
+            
+            searches_with_display.append({
+                'id': search.id,
+                'display_name': display_name[:50],
+            })
+        
+        # Reconstruct patent_risk_data from cache directly (no database query needed)
+        # We store minimal patent data in cache to avoid fetching full Patent objects
+        from accounts.models import Patent
+        
+        patent_risk_data = []
+        for p in cache_data.get('patent_risk_data', []):
+            # Create a lightweight dict with patent data instead of fetching from DB
+            patent_risk_data.append({
+                'patent_id': p.get('patent_id'),
+                'publication_number': p.get('publication_number', ''),
+                'title': p.get('title', ''),
+                'risks': p.get('risks', []),
+                'has_risks': p.get('has_risks', False),
+                'has_military': p.get('has_military', False),
+                'has_surveillance': p.get('has_surveillance', False),
+            })
+        
+        context = {
+            'user': request.user,
+            'saved_searches': searches_with_display,
+            'selected_search': selected_search,
+            'total_patents': total_patents,
+            'patents_with_risks': patents_with_risks,
+            'total_risks': patents_with_risks,
+            'patents_with_military': patents_with_military,
+            'patents_with_surveillance': patents_with_surveillance,
+            'patents_with_online_manipulation': patents_with_online_manipulation,
+            'online_manipulation_percentage': online_manipulation_percentage,
+            'military_percentage': military_percentage,
+            'surveillance_percentage': surveillance_percentage,
+            'risks_percentage': risks_percentage,
+            'total_patents_in_search': total_patents_in_search,
+            'risk_labels_json': json.dumps(cache_data.get('risk_labels', [])),
+            'risk_values_json': json.dumps(cache_data.get('risk_values', [])),
+            'time_labels_json': json.dumps(cache_data.get('time_labels', [])),
+            'time_values_json': json.dumps(cache_data.get('time_values', [])),
+            'patent_risk_data': patent_risk_data,
+            'cache_status': f'Cached at {cache.cached_at.strftime("%Y-%m-%d %H:%M:%S")}' if cache else 'No cache',
+        }
+        return render(request, 'accounts/dashboard.html', context)
+    
+    # No cache - compute from scratch (original slow path)
+    return _dashboard_compute(request, saved_searches, selected_search_id, selected_search)
+
+
+def _get_total_patents_for_search(selected_search, selected_search_id):
+    """Get total patent count for a search without full analysis."""
+    from django.db.models import Q
+    q = Q()
+    
+    if selected_search and selected_search_id:
+        if selected_search.applicant:
+            q |= Q(applicants__icontains=selected_search.applicant)
+        if selected_search.inventor:
+            q |= Q(inventors__icontains=selected_search.inventor)
+        if selected_search.assignee:
+            q |= Q(entities__name__icontains=selected_search.assignee, entities__entity_type='assignee')
+        if selected_search.query:
+            q |= Q(title__icontains=selected_search.query)
+    
+    if q:
+        return Patent.objects.filter(q).distinct().count()
+    return Analysis.objects.count()
+
+
+def _dashboard_compute(request, saved_searches, selected_search_id, selected_search):
+    """Original dashboard computation logic - kept for fallback when no cache exists."""
+    from collections import Counter
+    from accounts.models import Patent
     # Keywords to detect military/surveillance from parsed_risks (from API analysis)
     military_risk_keywords = ['military', 'weapon', 'defense', 'ordnance', 'munition', 'warfare', 'combat', 'armi', '武器', '軍', 'security', 'attack', 'threat']
     surveillance_risk_keywords = ['surveillance', 'monitoring', 'tracking', 'recognit', 'spy', 'intercept', 'camer', 'sensor', '監視', '偵查', 'face recognition', 'biometric', 'privacy', 'data collection']
+    online_manipulation_keywords = ['manipulation', 'manipulat', 'cognitive bias', 'emotional vulnerab', 'psychographic', 'microtarget', 'dark pattern', 'covert influence', 'exploit vulnerab', 'personalized pricing', 'urgency tactic', 'behavioral nudge', 'addictive behav', 'algorithmic management', 'disinformation', 'polarization']
     
     # Get analyses - either filtered by selected search or all
     total_patents_in_search = 0  # Total patents from the search
@@ -274,41 +404,24 @@ def dashboard(request):
         try:
             selected_search = SavedSearch.objects.get(id=selected_search_id, user=request.user)
             
-            # Build query using the SavedSearch fields (applicant, inventor, assignee, query)
-            from django.db.models import Q
-            
-            # Build Q objects for filtering - match against patent fields directly
-            # Note: When filtering on Patent model directly, don't use 'patent__' prefix
-            # Also, there's no 'assignees' field in Patent - need to search through entities
-            from django.db.models import Q
-            
             q = Q()
             
             if selected_search.applicant:
-                # applicants is a JSON field containing a list
                 q |= Q(applicants__icontains=selected_search.applicant)
             if selected_search.inventor:
-                # inventors is a JSON field containing a list
                 q |= Q(inventors__icontains=selected_search.inventor)
             if selected_search.assignee:
-                # Assignees are stored in Entity model with many-to-many relationship
-                # Search through entities with entity_type='assignee'
                 q |= Q(entities__name__icontains=selected_search.assignee, entities__entity_type='assignee')
             if selected_search.query:
                 q |= Q(title__icontains=selected_search.query)
             
             if q:
-                # Get all patents matching the search criteria (for total count)
-                from accounts.models import Patent
-                # Use distinct() to avoid duplicate patents from entity joins
                 matching_patents = Patent.objects.filter(q).distinct()
                 total_patents_in_search = matching_patents.count()
                 
-                # Get analyses for those patents (using the patent_id)
                 patent_ids = list(matching_patents.values_list('patent_id', flat=True))
                 analyses = Analysis.objects.select_related('patent').filter(patent_id__in=patent_ids)
             else:
-                # No search criteria, fall back to all
                 analyses = Analysis.objects.select_related('patent').all()
                 total_patents_in_search = analyses.count()
                 
@@ -319,103 +432,93 @@ def dashboard(request):
     else:
         analyses = Analysis.objects.select_related('patent').all()
         selected_search = None
-        # When showing all, total is the same as analyzed (all are analyzed)
         total_patents_in_search = analyses.count()
     
-    # Convert to list for iteration
     analyses = list(analyses)
     
-    # Basic stats
     total_patents = len(analyses)
     patents_with_risks = 0
     total_risks = 0
-    
-    # Risk type distribution
     risk_counts = Counter()
-    
-    # Time series data - group by year-month
     risks_by_month = Counter()
-    
     patents_with_military = 0
     patents_with_surveillance = 0
-    
-    # List of patents with their risk data
+    patents_with_online_manipulation = 0
     patent_risk_data = []
     
     for analysis in analyses:
         patent = analysis.patent
         parsed_risks = analysis.parsed_risks
         
-        # Check for military/surveillance in the parsed risks (from API)
         has_military = False
         has_surveillance = False
+        has_online_manipulation = False
         
         if parsed_risks and isinstance(parsed_risks, list) and len(parsed_risks) > 0:
-            # Check each risk for military/surveillance keywords
             for risk in parsed_risks:
                 risk_type = risk.get('risk', '').lower()
-                
-                # Check military keywords
                 if any(kw in risk_type for kw in military_risk_keywords):
                     has_military = True
-                
-                # Check surveillance keywords
                 if any(kw in risk_type for kw in surveillance_risk_keywords):
                     has_surveillance = True
+                if any(kw in risk_type for kw in online_manipulation_keywords):
+                    has_online_manipulation = True
         
         if has_military:
             patents_with_military += 1
         if has_surveillance:
             patents_with_surveillance += 1
+        if has_online_manipulation:
+            patents_with_online_manipulation += 1
         
-        # Process risks
         if parsed_risks and isinstance(parsed_risks, list) and len(parsed_risks) > 0:
             patents_with_risks += 1
             total_risks += len(parsed_risks)
             
-            # Count risk types
             for risk in parsed_risks:
                 risk_type = risk.get('risk', 'Unknown')
                 risk_counts[risk_type] += 1
             
-            # Time series - use patent publication date, count patents with risks (not individual risks)
             if patent.publication_date:
                 month_key = patent.publication_date.strftime('%Y-%m')
                 risks_by_month[month_key] += 1
             
-            # Add patent to list with its risks
             patent_risk_data.append({
-                'patent': patent,
+                'patent_id': patent.patent_id,
+                'publication_number': patent.publication_number,
+                'title': patent.title,
                 'risks': parsed_risks,
                 'has_risks': True,
                 'has_military': has_military,
                 'has_surveillance': has_surveillance,
+                'has_online_manipulation': has_online_manipulation,
             })
         else:
-            # Add patent without risks
             patent_risk_data.append({
-                'patent': patent,
+                'patent_id': patent.patent_id,
+                'publication_number': patent.publication_number,
+                'title': patent.title,
                 'risks': [],
                 'has_risks': False,
                 'has_military': has_military,
                 'has_surveillance': has_surveillance,
+                'has_online_manipulation': has_online_manipulation,
             })
     
-    # Calculate percentages
     if total_patents > 0:
         military_percentage = round((patents_with_military / total_patents) * 100, 1)
         surveillance_percentage = round((patents_with_surveillance / total_patents) * 100, 1)
+        online_manipulation_percentage = round((patents_with_online_manipulation / total_patents) * 100, 1)
         risks_percentage = round((patents_with_risks / total_patents) * 100, 1)
     else:
         military_percentage = 0
         surveillance_percentage = 0
+        online_manipulation_percentage = 0
         risks_percentage = 0
     
-    # Prepare risk distribution data for Plotly bar chart
     risk_labels = list(risk_counts.keys())
     risk_values = list(risk_counts.values())
     
-    # Prepare time series data for Plotly
     if risks_by_month:
         sorted_months = sorted(risks_by_month.keys())
         time_labels = sorted_months
@@ -424,7 +527,6 @@ def dashboard(request):
         time_labels = []
         time_values = []
     
-    # Build display names for searches
     searches_with_display = []
     for search in saved_searches:
         if search.name:
@@ -445,7 +547,6 @@ def dashboard(request):
             'display_name': display_name[:50],
         })
     
-    # Serialize data for JavaScript
     context = {
         'user': request.user,
         'saved_searches': searches_with_display,
@@ -455,6 +556,7 @@ def dashboard(request):
         'total_risks': total_risks,
         'patents_with_military': patents_with_military,
         'patents_with_surveillance': patents_with_surveillance,
+        'patents_with_online_manipulation': patents_with_online_manipulation,
         'military_percentage': military_percentage,
         'surveillance_percentage': surveillance_percentage,
         'risks_percentage': risks_percentage,
@@ -463,10 +565,198 @@ def dashboard(request):
         'risk_values_json': json.dumps(risk_values),
         'time_labels_json': json.dumps(time_labels),
         'time_values_json': json.dumps(time_values),
-        'patent_risk_data': patent_risk_data[:50],  # Limit to 50 for performance
+        'patent_risk_data': patent_risk_data[:50],
+        'cache_status': 'No cache - computed fresh',
     }
     
     return render(request, 'accounts/dashboard.html', context)
+
+
+@login_required
+def recalculate_cache(request):
+    """
+    Recalculate dashboard cache for the current user.
+    Can recalculate for a specific saved search or all patents (global).
+    Returns JSON response with status.
+    """
+    from django.http import JsonResponse
+    from django.views.decorators.http import require_POST
+    from django.utils import timezone
+    from collections import Counter
+    
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST method required'}, status=405)
+    
+    search_id = request.POST.get('search_id') or request.GET.get('search_id')
+    
+    # Get or create cache entry
+    if search_id:
+        try:
+            saved_search = SavedSearch.objects.get(id=search_id, user=request.user)
+            cache, created = DashboardCache.objects.get_or_create(
+                user=request.user,
+                saved_search=saved_search,
+                defaults={'is_global': False}
+            )
+        except SavedSearch.DoesNotExist:
+            return JsonResponse({'error': 'Saved search not found'}, status=404)
+    else:
+        # Global cache for all patents
+        cache, created = DashboardCache.objects.get_or_create(
+            user=request.user,
+            saved_search=None,
+            defaults={'is_global': True}
+        )
+    
+    # Build Q objects for filtering
+    q = Q()
+    selected_search = None
+    total_patents_in_search = 0
+    
+    if search_id:
+        try:
+            selected_search = SavedSearch.objects.get(id=search_id, user=request.user)
+            
+            if selected_search.applicant:
+                q |= Q(applicants__icontains=selected_search.applicant)
+            if selected_search.inventor:
+                q |= Q(inventors__icontains=selected_search.inventor)
+            if selected_search.assignee:
+                q |= Q(entities__name__icontains=selected_search.assignee, entities__entity_type='assignee')
+            if selected_search.query:
+                q |= Q(title__icontains=selected_search.query)
+            
+            if q:
+                matching_patents = Patent.objects.filter(q).distinct()
+                total_patents_in_search = matching_patents.count()
+                patent_ids = list(matching_patents.values_list('patent_id', flat=True))
+                analyses = Analysis.objects.select_related('patent').filter(patent_id__in=patent_ids)
+            else:
+                analyses = Analysis.objects.select_related('patent').all()
+                total_patents_in_search = analyses.count()
+        except SavedSearch.DoesNotExist:
+            analyses = Analysis.objects.select_related('patent').all()
+            total_patents_in_search = analyses.count()
+    else:
+        analyses = Analysis.objects.select_related('patent').all()
+        total_patents_in_search = analyses.count()
+    
+    analyses = list(analyses)
+    
+    # Compute stats (same logic as dashboard)
+    total_patents = len(analyses)
+    patents_with_risks = 0
+    total_risks = 0
+    risk_counts = Counter()
+    risks_by_month = Counter()
+    patents_with_military = 0
+    patents_with_surveillance = 0
+    patents_with_online_manipulation = 0
+    patent_risk_data = []
+    
+    military_risk_keywords = ['military', 'weapon', 'defense', 'ordnance', 'munition', 'warfare', 'combat', 'armi', '武器', '軍', 'security', 'attack', 'threat']
+    surveillance_risk_keywords = ['surveillance', 'monitoring', 'tracking', 'recognit', 'spy', 'intercept', 'camer', 'sensor', '監視', '偵查', 'face recognition', 'biometric', 'privacy', 'data collection']
+    online_manipulation_keywords = ['manipulation', 'manipulat', 'cognitive bias', 'emotional vulnerab', 'psychographic', 'microtarget', 'dark pattern', 'covert influence', 'exploit vulnerab', 'personalized pricing', 'urgency tactic', 'behavioral nudge', 'addictive behav', 'algorithmic management', 'disinformation', 'polarization']
+    
+    for analysis in analyses:
+        patent = analysis.patent
+        parsed_risks = analysis.parsed_risks
+        
+        has_military = False
+        has_surveillance = False
+        has_online_manipulation = False
+        
+        if parsed_risks and isinstance(parsed_risks, list) and len(parsed_risks) > 0:
+            for risk in parsed_risks:
+                risk_type = risk.get('risk', '').lower()
+                if any(kw in risk_type for kw in military_risk_keywords):
+                    has_military = True
+                if any(kw in risk_type for kw in surveillance_risk_keywords):
+                    has_surveillance = True
+                if any(kw in risk_type for kw in online_manipulation_keywords):
+                    has_online_manipulation = True
+        
+        if has_military:
+            patents_with_military += 1
+        if has_surveillance:
+            patents_with_surveillance += 1
+        if has_online_manipulation:
+            patents_with_online_manipulation += 1
+        
+        if parsed_risks and isinstance(parsed_risks, list) and len(parsed_risks) > 0:
+            patents_with_risks += 1
+            total_risks += len(parsed_risks)
+            
+            for risk in parsed_risks:
+                risk_type = risk.get('risk', 'Unknown')
+                risk_counts[risk_type] += 1
+            
+            if patent.publication_date:
+                month_key = patent.publication_date.strftime('%Y-%m')
+                risks_by_month[month_key] += 1
+            
+            patent_risk_data.append({
+                'patent_id': patent.patent_id,
+                'publication_number': patent.publication_number,
+                'title': patent.title,
+                'risks': parsed_risks,
+                'has_risks': True,
+                'has_military': has_military,
+                'has_surveillance': has_surveillance,
+                'has_online_manipulation': has_online_manipulation,
+            })
+        else:
+            patent_risk_data.append({
+                'patent_id': patent.patent_id,
+                'publication_number': patent.publication_number,
+                'title': patent.title,
+                'risks': [],
+                'has_risks': False,
+                'has_military': has_military,
+                'has_surveillance': has_surveillance,
+                'has_online_manipulation': has_online_manipulation,
+            })
+    
+    # Calculate percentages
+    if total_patents > 0:
+        military_percentage = round((patents_with_military / total_patents) * 100, 1)
+        surveillance_percentage = round((patents_with_surveillance / total_patents) * 100, 1)
+        online_manipulation_percentage = round((patents_with_online_manipulation / total_patents) * 100, 1)
+        risks_percentage = round((patents_with_risks / total_patents) * 100, 1)
+    else:
+        military_percentage = 0
+        surveillance_percentage = 0
+        online_manipulation_percentage = 0
+        risks_percentage = 0
+    
+    # Prepare cache data
+    cache_data = {
+        'risk_labels': list(risk_counts.keys()),
+        'risk_values': list(risk_counts.values()),
+        'time_labels': sorted(risks_by_month.keys()),
+        'time_values': [risks_by_month[m] for m in sorted(risks_by_month.keys())],
+        'patent_risk_data': patent_risk_data[:50],  # Limit to 50
+    }
+    
+    # Update cache
+    cache.cache_data = cache_data
+    cache.cached_at = timezone.now()
+    cache.patent_count = total_patents
+    cache.risks_count = total_risks
+    cache.patents_with_military = patents_with_military
+    cache.patents_with_surveillance = patents_with_surveillance
+    cache.patents_with_online_manipulation = patents_with_online_manipulation
+    cache.save()
+    
+    return JsonResponse({
+        'success': True,
+        'cached_at': cache.cached_at.isoformat(),
+        'patent_count': total_patents,
+        'risks_count': total_risks,
+        'patents_with_military': patents_with_military,
+        'patents_with_surveillance': patents_with_surveillance,
+        'patents_with_online_manipulation': patents_with_online_manipulation,
+    })
 
 @login_required
 def profile(request):

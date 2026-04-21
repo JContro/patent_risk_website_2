@@ -22,13 +22,18 @@ def analyse_patent_with_vllm(patent, prompt_template):
     # Note: vLLM runs on port 8000 inside container, mapped to 8090 on host
     vllm_api_url = getattr(settings, 'VLLM_API_URL', 'http://172.19.0.3:8000')
     
-    # Get the risks list from settings
-    risks_list = getattr(settings, 'EU_AI_RISKS', [])
-    if not risks_list:
+    # Get the structured risks list from settings
+    risks_structure = getattr(settings, 'EU_AI_RISKS_STRUCTURE', {})
+    if not risks_structure:
         raise ValueError("EU AI Risks not configured. Please check settings.")
-    
-    # Format the risks list as a string
-    risks_str = "\n".join(f"- {risk}" for risk in risks_list)
+
+    # Format the risks list as a string with category headers
+    risks_str = ""
+    for category, risks in risks_structure.items():
+        risks_str += f"\n{category}:\n"
+        for risk in risks:
+            risks_str += f"  - {risk}\n"
+    risks_str = risks_str.strip()
     
     # Build patent claims from the patent object
     patent_claims = _build_patent_claims(patent)

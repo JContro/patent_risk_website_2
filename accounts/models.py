@@ -178,21 +178,54 @@ class SavedSearch(models.Model):
     """
     # Foreign key to User
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='saved_searches')
-    
+
     # Search name (optional, user can name their search)
     name = models.CharField(max_length=255, blank=True, null=True)
-    
+
     # Search parameters (stored as JSON)
     query = models.CharField(max_length=500, blank=True, null=True)
     inventor = models.CharField(max_length=255, blank=True, null=True)
     applicant = models.CharField(max_length=255, blank=True, null=True)
     assignee = models.CharField(max_length=255, blank=True, null=True)
-    
+
     # Timestamp
     created_at = models.DateTimeField(auto_now_add=True)
-    
+
     class Meta:
         ordering = ['-created_at']
-    
+
     def __str__(self):
         return f"SavedSearch {self.name or self.query} by {self.user.email}"
+
+
+class DashboardCache(models.Model):
+    """
+    Cached dashboard data for a user's saved search.
+    Pre-computes expensive aggregations for fast dashboard loading.
+    """
+    # Foreign key to User and SavedSearch
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='dashboard_caches')
+    saved_search = models.ForeignKey(SavedSearch, on_delete=models.CASCADE, related_name='dashboard_cache', null=True, blank=True)
+    
+    # Cached computed data (stored as JSON)
+    cache_data = models.JSONField(default=dict)
+    
+    # Cache metadata
+    cached_at = models.DateTimeField(auto_now_add=True)
+    patent_count = models.IntegerField(default=0)
+    risks_count = models.IntegerField(default=0)
+    patents_with_military = models.IntegerField(default=0)
+    patents_with_surveillance = models.IntegerField(default=0)
+    patents_with_online_manipulation = models.IntegerField(default=0)
+    
+    # Is this cache for all patents (null saved_search) or specific search?
+    is_global = models.BooleanField(default=False)
+    
+    class Meta:
+        verbose_name_plural = "Dashboard caches"
+        unique_together = ['user', 'saved_search']
+        ordering = ['-cached_at']
+    
+    def __str__(self):
+        search_desc = "Global" if self.is_global else f"Search #{self.saved_search_id}"
+        return f"DashboardCache for {self.user.email} ({search_desc})"

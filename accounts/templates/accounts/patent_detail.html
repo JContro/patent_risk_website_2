@@ -210,12 +210,16 @@
 
         .risk-snippet {
             font-style: italic;
-            color: #1d1d1f;
-            padding: 0.5rem;
-            background: #f8f9fa;
-            border-radius: 4px;
+        }
+        
+        .risk-explanation {
+            margin-top: 0.5rem;
+            padding: 0.75rem;
+            background: rgba(0, 113, 227, 0.05);
             border-left: 3px solid #0071e3;
-            margin-bottom: 0.5rem;
+            border-radius: 0 8px 8px 0;
+            font-size: 0.9rem;
+            color: #555;
         }
 
         .snippet-warning {
@@ -539,6 +543,9 @@
                                                         <span class="risk-confidence">Confidence: {{ risk.confidence_score }}</span>
                                                     </div>
                                                     <div class="risk-snippet">"{{ risk.snippet }}"</div>
+                                                    {% if risk.explanation %}
+                                                        <div class="risk-explanation">{{ risk.explanation }}</div>
+                                                    {% endif %}
                                                     {% if not snippet_result.found %}
                                                         <div class="snippet-warning">
                                                             ⚠️ Warning: This snippet was not found in the patent's claims or abstract
