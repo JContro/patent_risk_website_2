@@ -18,9 +18,9 @@ def analyse_patent_with_vllm(patent, prompt_template):
         The raw response from vLLM API as a string, or None if failed
     """
     # Get the vLLM API URL from settings
-    # Use the Docker network IP for vLLM server when running in container
+    # Use the Docker service name to reach vLLM server on the same network
     # Note: vLLM runs on port 8000 inside container, mapped to 8090 on host
-    vllm_api_url = getattr(settings, 'VLLM_API_URL', 'http://172.19.0.3:8000')
+    vllm_api_url = getattr(settings, 'VLLM_API_URL', 'http://vllm-api-server:8000')
     
     # Get the structured risks list from settings
     risks_structure = getattr(settings, 'EU_AI_RISKS_STRUCTURE', {})

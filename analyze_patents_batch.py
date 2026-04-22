@@ -58,29 +58,32 @@ def run_batch_analysis(limit=None, batch_size=10):
         print('ERROR: PATENT_ANALYSIS_PROMPT not configured')
         return
     
-    patents_without_analysis = Patent.objects.filter(analysis__isnull=True)
-    total_count = patents_without_analysis.count()
+    print('Step 1: Querying patent IDs without analysis...')
+    # Only fetch IDs first to avoid loading all data into memory
+    patent_ids = list(Patent.objects.filter(analysis__isnull=True).values_list('patent_id', flat=True))
+    total_count = len(patent_ids)
+    print(f'Step 2: Found {total_count} patents')
     
     if total_count == 0:
         print('No patents without analysis')
         return
     
-    print(f'Found {total_count} patents without analysis')
-    print('Using vLLM API at http://172.19.0.3:8000')
+    vllm_url = getattr(settings, 'VLLM_API_URL', 'http://vllm-api-server:8000')
+    print(f'Using vLLM API at {vllm_url}')
     print('-' * 60)
     
     if limit:
-        patents_to_analyze = list(patents_without_analysis[:limit])
+        patent_ids = patent_ids[:limit]
         print(f'Limited to {limit} patents')
-    else:
-        patents_to_analyze = list(patents_without_analysis)
     
     analyzed_count = 0
     error_count = 0
     start_time = datetime.now()
     
-    for i, patent in enumerate(patents_to_analyze):
+    for i, patent_id in enumerate(patent_ids):
         try:
+            # Fetch only the specific patent we need
+            patent = Patent.objects.get(patent_id=patent_id)
             raw_response = analyse_patent_with_vllm(patent, prompt_template)
             parsed_risks = None
             if raw_response:
@@ -99,10 +102,10 @@ def run_batch_analysis(limit=None, batch_size=10):
                 rate = analyzed_count / elapsed if elapsed > 0 else 0
                 remaining = (total_count - analyzed_count) / rate if rate > 0 else 0
                 ts = datetime.now().strftime("%H:%M:%S")
-                print(f"[{ts}] Analyzed {analyzed_count}/{len(patents_to_analyze)} patents ({rate:.1f}/sec, ~{remaining/60:.1f} min remaining)")
+                print(f"[{ts}] Analyzed {analyzed_count}/{len(patent_ids)} patents ({rate:.1f}/sec, ~{remaining/60:.1f} min remaining)")
         except Exception as e:
             error_count += 1
-            print(f'ERROR patent {patent.patent_id}: {str(e)[:100]}')
+            print(f'ERROR patent_id {patent_id}: {str(e)[:100]}')
     
     elapsed = (datetime.now() - start_time).total_seconds()
     print('-' * 60)
