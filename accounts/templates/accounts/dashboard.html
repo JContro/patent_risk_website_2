@@ -622,6 +622,7 @@
                 </thead>
                 <tbody>
                     {% for item in patent_risk_data %}
+                    {% if item.has_risks %}
                     <tr>
                         <td>
                             <a href="{% url 'patent_detail' item.patent_id %}" class="patent-number">
@@ -631,25 +632,21 @@
                         <td class="patent-title" title="{{ item.title }}">
                             {{ item.title|truncatechars:50 }}
                         </td>
-                        <td>{{ item.publication_date|default:"N/A" }}</td>
+                        <td>{% if item.publication_date %}{{ item.publication_date|date:"F d, Y" }}{% else %}N/A{% endif %}</td>
                         <td>
-                            {% if item.has_risks %}
-                                {% for risk in item.risks|slice:":3" %}
-                                    {% with risk_risk=risk.risk|lower %}
-                                    <span class="risk-badge 
-                                        {% if 'high' in risk_risk %}high
-                                        {% elif 'medium' in risk_risk or 'moderate' in risk_risk %}medium
-                                        {% elif 'low' in risk_risk %}low
-                                        {% else %}unknown{% endif %}">
-                                        {{ risk.risk|truncatechars:20 }}
-                                    </span>
-                                    {% endwith %}
-                                {% endfor %}
-                                {% if item.risks|length > 3 %}
-                                    <span class="risk-badge unknown">+{{ item.risks|length|add:"-3" }} more</span>
-                                {% endif %}
-                            {% else %}
-                                <span style="color: #34c759;">No risks</span>
+                            {% for risk in item.risks|slice:":3" %}
+                                {% with risk_risk=risk.risk|lower %}
+                                <span class="risk-badge
+                                    {% if 'high' in risk_risk %}high
+                                    {% elif 'medium' in risk_risk or 'moderate' in risk_risk %}medium
+                                    {% elif 'low' in risk_risk %}low
+                                    {% else %}unknown{% endif %}">
+                                    {{ risk.risk|truncatechars:20 }}
+                                </span>
+                                {% endwith %}
+                            {% endfor %}
+                            {% if item.risks|length > 3 %}
+                                <span class="risk-badge unknown">+{{ item.risks|length|add:"-3" }} more</span>
                             {% endif %}
                         </td>
                         <td>
@@ -661,6 +658,7 @@
                             {% endif %}
                         </td>
                     </tr>
+                    {% endif %}
                     {% endfor %}
                 </tbody>
             </table>
