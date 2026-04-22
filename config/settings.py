@@ -112,6 +112,9 @@ AUTH_USER_MODEL = 'accounts.User'
 # OpenRouter API configuration
 OPENROUTER_API_KEY = os.environ.get('OPENROUTER_API_KEY', '')
 
+# vLLM API configuration
+VLLM_API_URL = os.environ.get('VLLM_API_URL', 'http://vllm-api-server:8000')
+
 # Patent analysis prompt template
 # Use {risks_list} and {patent_claims} as placeholders
 PATENT_ANALYSIS_PROMPT = os.environ.get('PATENT_ANALYSIS_PROMPT', '''Analyze the following patent text and extract any risks related to EU AI Act concerns.
