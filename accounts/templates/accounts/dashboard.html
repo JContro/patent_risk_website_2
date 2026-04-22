@@ -284,6 +284,7 @@
             padding: 1.5rem;
             box-shadow: 0 10px 30px rgba(0, 113, 227, 0.1);
             border: 1px solid rgba(255, 255, 255, 0.5);
+            overflow: hidden;
         }
 
         .chart-title {
@@ -295,7 +296,7 @@
 
         .chart-container {
             width: 100%;
-            min-height: 350px;
+            min-height: 300px;
         }
 
         /* Patent List */
@@ -594,10 +595,10 @@
 
         <!-- Charts Grid -->
         <div class="charts-grid">
-            <!-- Risk Distribution Bar Chart -->
+            <!-- Risk Distribution by Category (Top Level) -->
             <div class="chart-card">
-                <div class="chart-title">Risk Distribution by Type</div>
-                <div id="risk-bar-chart" class="chart-container"></div>
+                <div class="chart-title">Risk Distribution by Category</div>
+                <div id="risk-category-chart" class="chart-container"></div>
             </div>
             
             <!-- Time Series Chart -->
@@ -605,6 +606,11 @@
                 <div class="chart-title">Risks Over Time</div>
                 <div id="time-chart" class="chart-container"></div>
             </div>
+        </div>
+        
+        <!-- Sub-Risk Category Charts -->
+        <div id="subrisk-charts-container" class="charts-grid" style="margin-top: 20px;">
+            <!-- Dynamically populated by JavaScript -->
         </div>
 
         <!-- Patent List -->
@@ -681,38 +687,39 @@
     </div>
 
     <script>
-        // Risk Distribution Bar Chart
-        const riskLabels = {{ risk_labels_json|safe }};
-        const riskValues = {{ risk_values_json|safe }};
+        // Category totals data
+        const categoryTotals = {{ category_totals_json|safe }} || {};
+        const categorySubriskData = {{ category_subrisk_data_json|safe }} || {};
+        const categoryNames = Object.keys(categoryTotals);
+        const categoryValues = Object.values(categoryTotals);
         
-        if (riskLabels.length > 0 && riskValues.length > 0) {
-            // Truncate long risk labels for display (hover shows full name)
-            const truncatedLabels = riskLabels.map(label =>
-                label.length > 20 ? label.substring(0, 17) + '...' : label
-            );
-            const riskTrace = {
-                x: truncatedLabels,
-                y: riskValues,
+        // Chart 1: Risk Distribution by Category (simple bar chart)
+        if (categoryNames.length > 0) {
+            const categoryTrace = {
+                x: categoryNames,
+                y: categoryValues,
                 type: 'bar',
                 marker: {
-                    color: riskValues.map((v, i) => {
-                        const colors = ['#0071e3', '#ff3b30', '#ff9500', '#34c759', '#5e5ce6', '#ff2d55', '#00c7be'];
+                    color: categoryNames.map((_, i) => {
+                        const colors = ['#0071e3', '#ff3b30', '#ff9500', '#34c759', '#5e5ce6'];
                         return colors[i % colors.length];
                     })
                 },
-                hovertemplate: '<b>%{x}</b><br>Count: %{y}<extra></extra>'
+                hovertemplate: '<b>%{x}</b><br>Patents: %{y}<extra></extra>'
             };
             
-            const riskLayout = {
+            const categoryLayout = {
                 margin: { t: 20, r: 20, b: 80, l: 60 },
                 xaxis: {
+                    title: 'Risk Category',
                     tickangle: -45,
                     automargin: true
                 },
                 yaxis: {
-                    title: 'Number of Risks',
+                    title: 'Number of Patents',
                     automargin: true
                 },
+                bargap: 0.3,
                 paper_bgcolor: 'rgba(0,0,0,0)',
                 plot_bgcolor: 'rgba(0,0,0,0)',
                 font: {
@@ -720,9 +727,63 @@
                 }
             };
             
-            Plotly.newPlot('risk-bar-chart', [riskTrace], riskLayout, {responsive: true});
+            Plotly.newPlot('risk-category-chart', [categoryTrace], categoryLayout, {responsive: true});
+            
+            // Chart 2+: Sub-risk charts for each category
+            const subriskContainer = document.getElementById('subrisk-charts-container');
+            const colors = ['#0071e3', '#ff3b30', '#ff9500', '#34c759', '#5e5ce6', '#ff2d55', '#00c7be', '#af52de', '#ffcc00', '#64d2ff'];
+            
+            categoryNames.forEach((catName, catIndex) => {
+                const subriskData = categorySubriskData[catName];
+                if (subriskData && subriskData.labels && subriskData.labels.length > 0) {
+                    // Create chart card
+                    const chartCard = document.createElement('div');
+                    chartCard.className = 'chart-card';
+                    chartCard.innerHTML = `
+                        <div class="chart-title">${catName} - Sub-Risks</div>
+                        <div id="subrisk-chart-${catIndex}" class="chart-container"></div>
+                    `;
+                    subriskContainer.appendChild(chartCard);
+                    
+                    // Create trace for this category's sub-risks
+                    const subriskTrace = {
+                        x: subriskData.labels.map(l => l.length > 30 ? l.substring(0, 27) + '...' : l),
+                        y: subriskData.values,
+                        type: 'bar',
+                        marker: {
+                            color: colors[catIndex % colors.length]
+                        },
+                        hovertemplate: '<b>%{x}</b><br>Count: %{y}<extra></extra>'
+                    };
+                    
+                    const subriskLayout = {
+                        margin: { t: 20, r: 20, b: 80, l: 60 },
+                        xaxis: {
+                            title: 'Sub-Risk',
+                            tickangle: -45,
+                            automargin: true
+                        },
+                        bargap: 0.5,
+                        yaxis: {
+                            title: 'Count',
+                            automargin: true
+                        },
+                        paper_bgcolor: 'rgba(0,0,0,0)',
+                        plot_bgcolor: 'rgba(0,0,0,0)',
+                        font: {
+                            family: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
+                        }
+                    };
+                    
+                    Plotly.newPlot(`subrisk-chart-${catIndex}`, [subriskTrace], subriskLayout, {responsive: true});
+                }
+            });
+            
+            if (subriskContainer.children.length === 0) {
+                subriskContainer.innerHTML = '<div style="text-align: center; color: #6e6e73; padding: 20px;">No sub-risk data available</div>';
+            }
         } else {
-            document.getElementById('risk-bar-chart').innerHTML = 
+            document.getElementById('risk-category-chart').innerHTML =
                 '<div style="text-align: center; color: #6e6e73; padding: 100px 0;">No risk data available</div>';
         }
 

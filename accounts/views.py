@@ -361,6 +361,11 @@ def dashboard(request):
             'risk_values_json': json.dumps(cache_data.get('risk_values', [])),
             'time_labels_json': json.dumps(cache_data.get('time_labels', [])),
             'time_values_json': json.dumps(cache_data.get('time_values', [])),
+            'stacked_categories_json': json.dumps(cache_data.get('stacked_categories', [])),
+            'stacked_labels_json': json.dumps(cache_data.get('stacked_labels', [])),
+            'stacked_values_json': json.dumps(cache_data.get('stacked_values', [])),
+            'category_totals_json': json.dumps(cache_data.get('category_totals', {})),
+            'category_subrisk_data_json': json.dumps(cache_data.get('category_subrisk_data', {})),
             'patent_risk_data': patent_risk_data,
             'cache_status': f'Cached at {cache.cached_at.strftime("%Y-%m-%d %H:%M:%S")}' if cache else 'No cache',
         }
@@ -488,7 +493,7 @@ def _dashboard_compute(request, saved_searches, selected_search_id, selected_sea
                 'patent_id': patent.patent_id,
                 'publication_number': patent.publication_number,
                 'title': patent.title,
-                'publication_date': patent.publication_date,
+                'publication_date': patent.publication_date.isoformat() if patent.publication_date else None,
                 'risks': parsed_risks,
                 'has_risks': True,
                 'has_military': has_military,
@@ -509,6 +514,72 @@ def _dashboard_compute(request, saved_searches, selected_search_id, selected_sea
     
     risk_labels = list(risk_counts.keys())
     risk_values = list(risk_counts.values())
+    
+    # Build category-level data with sub-risk percentages for stacked bar chart
+    risks_structure = getattr(settings, 'EU_AI_RISKS_STRUCTURE', {})
+    
+    # Create mapping from sub-risk to category
+    subrisk_to_category = {}
+    for category, subrisks in risks_structure.items():
+        for subrisk in subrisks:
+            subrisk_to_category[subrisk.lower()] = category
+    
+    # Count risks per category and track sub-risk breakdown
+    category_counts = {}
+    category_subrisks = {}
+    
+    for risk_type, count in risk_counts.items():
+        risk_lower = risk_type.lower()
+        # Find the category for this risk
+        category = None
+        matched_subrisk = None
+        for subrisk, cat in subrisk_to_category.items():
+            if subrisk in risk_lower or risk_lower in subrisk:
+                category = cat
+                matched_subrisk = subrisk
+                break
+        
+        if category:
+            if category not in category_counts:
+                category_counts[category] = 0
+                category_subrisks[category] = {}
+            category_counts[category] += count
+            # Store sub-risk with its count
+            if matched_subrisk not in category_subrisks[category]:
+                category_subrisks[category][matched_subrisk] = 0
+            category_subrisks[category][matched_subrisk] += count
+    
+    # Build data for stacked bar chart
+    # Categories on X-axis, sub-risks as stacked segments with percentages
+    stacked_categories = list(category_counts.keys())
+    stacked_labels = []  # All unique sub-risks across categories
+    for cat in stacked_categories:
+        for subrisk in category_subrisks[cat]:
+            if subrisk not in stacked_labels:
+                stacked_labels.append(subrisk)
+    
+    # stacked_values: count of each sub-risk within each category (for stacked bar)
+    stacked_values = []
+    for subrisk in stacked_labels:
+        row = []
+        for cat in stacked_categories:
+            if cat in category_subrisks and subrisk in category_subrisks[cat]:
+                count = category_subrisks[cat][subrisk]
+                row.append(count)
+            else:
+                row.append(0)
+        stacked_values.append(row)
+    
+    # Also include category totals for reference
+    category_totals = {cat: category_counts[cat] for cat in stacked_categories}
+    
+    # Per-category sub-risk data for separate charts
+    category_subrisk_data = {}
+    for cat in stacked_categories:
+        category_subrisk_data[cat] = {
+            'labels': list(category_subrisks[cat].keys()),
+            'values': list(category_subrisks[cat].values())
+        }
     
     if risks_by_month:
         sorted_months = sorted(risks_by_month.keys())
@@ -556,6 +627,11 @@ def _dashboard_compute(request, saved_searches, selected_search_id, selected_sea
         'risk_values_json': json.dumps(risk_values),
         'time_labels_json': json.dumps(time_labels),
         'time_values_json': json.dumps(time_values),
+        'stacked_categories_json': json.dumps(stacked_categories),
+        'stacked_labels_json': json.dumps(stacked_labels),
+        'stacked_values_json': json.dumps(stacked_values),
+        'category_totals_json': json.dumps(category_totals),
+        'category_subrisk_data_json': json.dumps(category_subrisk_data),
         'patent_risk_data': patent_risk_data[:50],
         'cache_status': 'No cache - computed fresh',
     }
@@ -690,7 +766,7 @@ def recalculate_cache(request):
                 'patent_id': patent.patent_id,
                 'publication_number': patent.publication_number,
                 'title': patent.title,
-                'publication_date': patent.publication_date,
+                'publication_date': patent.publication_date.isoformat() if patent.publication_date else None,
                 'risks': parsed_risks,
                 'has_risks': True,
                 'has_military': has_military,
@@ -710,6 +786,69 @@ def recalculate_cache(request):
         online_manipulation_percentage = 0
         risks_percentage = 0
     
+    # Build category-level data with sub-risk percentages for stacked bar chart
+    risks_structure = getattr(settings, 'EU_AI_RISKS_STRUCTURE', {})
+    
+    # Create mapping from sub-risk to category
+    subrisk_to_category = {}
+    for category, subrisks in risks_structure.items():
+        for subrisk in subrisks:
+            subrisk_to_category[subrisk.lower()] = category
+    
+    # Count risks per category and track sub-risk breakdown
+    category_counts = {}
+    category_subrisks = {}
+    
+    for risk_type, count in risk_counts.items():
+        risk_lower = risk_type.lower()
+        # Find the category for this risk
+        category = None
+        matched_subrisk = None
+        for subrisk, cat in subrisk_to_category.items():
+            if subrisk in risk_lower or risk_lower in subrisk:
+                category = cat
+                matched_subrisk = subrisk
+                break
+        
+        if category:
+            if category not in category_counts:
+                category_counts[category] = 0
+                category_subrisks[category] = {}
+            category_counts[category] += count
+            # Store sub-risk with its count
+            if matched_subrisk not in category_subrisks[category]:
+                category_subrisks[category][matched_subrisk] = 0
+            category_subrisks[category][matched_subrisk] += count
+    
+    # Build data for stacked bar chart
+    stacked_categories = list(category_counts.keys())
+    stacked_labels = []
+    for cat in stacked_categories:
+        for subrisk in category_subrisks[cat]:
+            if subrisk not in stacked_labels:
+                stacked_labels.append(subrisk)
+    
+    stacked_values = []
+    for subrisk in stacked_labels:
+        row = []
+        for cat in stacked_categories:
+            if cat in category_subrisks and subrisk in category_subrisks[cat]:
+                count = category_subrisks[cat][subrisk]
+                row.append(count)
+            else:
+                row.append(0)
+        stacked_values.append(row)
+    
+    category_totals = {cat: category_counts[cat] for cat in stacked_categories}
+    
+    # Per-category sub-risk data for separate charts
+    category_subrisk_data = {}
+    for cat in stacked_categories:
+        category_subrisk_data[cat] = {
+            'labels': list(category_subrisks[cat].keys()),
+            'values': list(category_subrisks[cat].values())
+        }
+    
     # Prepare cache data
     cache_data = {
         'risk_labels': list(risk_counts.keys()),
@@ -717,6 +856,11 @@ def recalculate_cache(request):
         'time_labels': sorted(risks_by_month.keys()),
         'time_values': [risks_by_month[m] for m in sorted(risks_by_month.keys())],
         'patent_risk_data': patent_risk_data[:50],  # Limit to 50
+        'stacked_categories': stacked_categories,
+        'stacked_labels': stacked_labels,
+        'stacked_values': stacked_values,
+        'category_totals': category_totals,
+        'category_subrisk_data': category_subrisk_data,
     }
     
     # Update cache
