@@ -107,7 +107,11 @@ def _build_patent_claims(patent):
         claims_parts.append(f"\nClaims:")
         for i, claim in enumerate(patent.claims, 1):
             if isinstance(claim, dict):
-                claim_text = claim.get('text', '')
+                # Handle nested structure: claim['claim_text']['text']
+                if 'claim_text' in claim and isinstance(claim['claim_text'], dict):
+                    claim_text = claim['claim_text'].get('text', '')
+                else:
+                    claim_text = claim.get('text', '')
             else:
                 claim_text = str(claim)
             if claim_text:

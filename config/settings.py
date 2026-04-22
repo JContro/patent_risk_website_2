@@ -130,7 +130,7 @@ INSTRUCTIONS:
 2. The response must be a JSON array of objects with exactly these keys:
    - "snippet": The exact text from the patent that contains the risk (string)
    - "risk": The exact risk category from the list above (string)
-   - "explanation": A brief explanation of why this is a risk (1-2 sentences max)
+   - "explanation": A brief explanation of why this is a risk, pertinent to the actual patent text (1-2 sentences max)
    - "confidence_score": A float between 0 and 1 (number, not string)
 3. If no risks are found, output an empty array: []
 4. Do not include any keys other than "snippet", "risk", "explanation", and "confidence_score"
