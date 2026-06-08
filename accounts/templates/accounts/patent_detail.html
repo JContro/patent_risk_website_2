@@ -455,6 +455,7 @@
                 <a href="{% url 'dashboard' %}" class="nav-link">Dashboard</a>
                 <a href="{% url 'search_patents' %}" class="nav-link">Search</a>
                 <a href="{% url 'patent_list' %}" class="nav-link">Patents</a>
+                <a href="{% url 'risk_categories' %}" class="nav-link">Risk Categories</a>
                 <form method="post" action="{% url 'logout' %}" style="display: inline;">
                     {% csrf_token %}
                     <button type="submit" class="nav-link" style="background: none; border: none; cursor: pointer;">Logout</button>

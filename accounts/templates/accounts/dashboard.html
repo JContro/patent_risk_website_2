@@ -9,6 +9,43 @@
         /* Reset & Base */
         * { margin: 0; padding: 0; box-sizing: border-box; }
         
+        /* Loading Spinner */
+        .loading-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(255, 255, 255, 0.8);
+            z-index: 9999;
+            justify-content: center;
+            align-items: center;
+        }
+        
+        .loading-overlay.active {
+            display: flex;
+        }
+        
+        .spinner {
+            width: 50px;
+            height: 50px;
+            border: 4px solid rgba(0, 113, 227, 0.2);
+            border-top-color: #0071e3;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        .loading-text {
+            margin-top: 1rem;
+            color: #0071e3;
+            font-weight: 600;
+        }
+        
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
             background: linear-gradient(135deg, #f5f7ff 0%, #e3e9ff 100%);
@@ -408,6 +445,35 @@
             color: #ff9500;
         }
 
+        /* Risk Filter Styles */
+        .risk-filter-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem 1.5rem;
+            align-items: center;
+        }
+
+        .risk-radio-label {
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+            cursor: pointer;
+            font-weight: 500;
+            color: #1d1d1f;
+            transition: color 0.2s;
+        }
+
+        .risk-radio-label:hover {
+            color: #0071e3;
+        }
+
+        .risk-radio-label input[type="radio"] {
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+            accent-color: #0071e3;
+        }
+
         /* Empty State */
         .empty-state {
             text-align: center;
@@ -469,6 +535,14 @@
     </style>
 </head>
 <body>
+    <!-- Loading Overlay -->
+    <div id="loading-overlay" class="loading-overlay">
+        <div style="text-align: center;">
+            <div class="spinner"></div>
+            <div class="loading-text">Loading patents...</div>
+        </div>
+    </div>
+    
     <div class="container">
         <div class="header">
             <div class="header-left">
@@ -477,6 +551,7 @@
                     <a href="{% url 'dashboard' %}" class="nav-link active">Dashboard</a>
                     <a href="{% url 'search_patents' %}" class="nav-link">Search</a>
                     <a href="{% url 'patent_list' %}" class="nav-link">Patents</a>
+                    <a href="{% url 'risk_categories' %}" class="nav-link">Risk Categories</a>
                 </nav>
             </div>
             <div class="user-info">
@@ -519,6 +594,12 @@
         <script>
         function recalculateCache() {
             const btn = document.getElementById('recalculate-btn');
+            const loadingOverlay = document.getElementById('loading-overlay');
+            
+            // Show loading overlay
+            loadingOverlay.classList.add('active');
+            document.querySelector('.loading-text').textContent = 'Recalculating cache with ALL patents... This may take a while.';
+            
             btn.disabled = true;
             btn.textContent = 'Recalculating...';
             
@@ -536,8 +617,12 @@
             })
             .then(response => response.json())
             .then(data => {
+                // Hide loading overlay
+                loadingOverlay.classList.remove('active');
+                document.querySelector('.loading-text').textContent = 'Loading patents...';
+                
                 if (data.success) {
-                    alert('Cache updated successfully!');
+                    alert('Cache updated successfully! Now storing ALL ' + data.risks_count + ' patents with risks.');
                     location.reload();
                 } else {
                     alert('Error: ' + data.error);
@@ -546,6 +631,10 @@
                 btn.textContent = 'Recalculate Cache';
             })
             .catch(error => {
+                // Hide loading overlay
+                loadingOverlay.classList.remove('active');
+                document.querySelector('.loading-text').textContent = 'Loading patents...';
+                
                 alert('Error: ' + error);
                 btn.disabled = false;
                 btn.textContent = 'Recalculate Cache';
@@ -616,6 +705,48 @@
         <!-- Patent List -->
         <div class="patent-list-card">
             <div class="patent-list-title">Patents with Risks (Highlighted)</div>
+            
+            <!-- Risk Category Filter -->
+            <div class="risk-filter-bar" style="margin-bottom: 1rem; padding: 1rem; background: #f5f7ff; border-radius: 10px;">
+                <div style="display: flex; flex-wrap: wrap; gap: 1rem; align-items: center; margin-bottom: 0.75rem;">
+                    <span style="font-weight: 600; color: #1d1d1f;">Filter by Risk:</span>
+                    <div style="display: flex; flex-wrap: wrap; gap: 0.75rem;">
+                        <label class="risk-radio-label">
+                            <input type="radio" name="risk_category" value="" {% if not risk_category %}checked{% endif %}
+                                   onchange="updateRiskFilter()"> All
+                        </label>
+                        <label class="risk-radio-label">
+                            <input type="radio" name="risk_category" value="Unacceptable" {% if risk_category == 'Unacceptable' %}checked{% endif %}
+                                   onchange="updateRiskFilter()"> Unacceptable
+                        </label>
+                        <label class="risk-radio-label">
+                            <input type="radio" name="risk_category" value="High Risk" {% if risk_category == 'High Risk' %}checked{% endif %}
+                                   onchange="updateRiskFilter()"> High Risk
+                        </label>
+                        <label class="risk-radio-label">
+                            <input type="radio" name="risk_category" value="General High Risks" {% if risk_category == 'General High Risks' %}checked{% endif %}
+                                   onchange="updateRiskFilter()"> General High Risks
+                        </label>
+                        <label class="risk-radio-label">
+                            <input type="radio" name="risk_category" value="Human Rights" {% if risk_category == 'Human Rights' %}checked{% endif %}
+                                   onchange="updateRiskFilter()"> Human Rights
+                        </label>
+                        <label class="risk-radio-label">
+                            <input type="radio" name="risk_category" value="Online Manipulation" {% if risk_category == 'Online Manipulation' %}checked{% endif %}
+                                   onchange="updateRiskFilter()"> Online Manipulation
+                        </label>
+                    </div>
+                </div>
+                <div style="display: flex; align-items: center; gap: 1rem;">
+                    <select id="sub-risk-select" style="display: none; padding: 0.5rem 0.75rem; border: 2px solid rgba(0, 113, 227, 0.2); border-radius: 8px; min-width: 350px; font-size: 0.9rem;" onchange="updateSubRiskFilter()">
+                        <option value="">-- Select Sub-Risk --</option>
+                    </select>
+                    {% if risk_category or sub_risk %}
+                    <a href="?{% if selected_search %}search_id={{ selected_search.id }}&{% endif %}risk_category={{ risk_category|urlencode }}" class="clear-filter-btn" style="padding: 0.5rem 1rem; background: #ff3b30; color: white; border-radius: 8px; text-decoration: none; font-size: 0.9rem; font-weight: 500;">Clear Filter</a>
+                    {% endif %}
+                </div>
+            </div>
+            
             <table class="patent-table">
                 <thead>
                     <tr>
@@ -717,7 +848,8 @@
                 },
                 yaxis: {
                     title: 'Number of Patents',
-                    automargin: true
+                    automargin: true,
+                    range: [0, Math.max(...categoryValues) * 1.15]
                 },
                 bargap: 0.3,
                 paper_bgcolor: 'rgba(0,0,0,0)',
@@ -746,27 +878,99 @@
                     subriskContainer.appendChild(chartCard);
                     
                     // Create trace for this category's sub-risks
+                    // Use numeric x indices so bars don't merge when display labels collide,
+                    // then use tickvals/ticktext for multi-line wrapped display labels.
+                    const numSubrisks = subriskData.labels.length;
+
+                    // Word-wrap a label to fit maxCharsPerLine per line, up to maxLines lines.
+                    // Long words are hard-broken. Overflow is truncated with an ellipsis.
+                    function wrapLabel(label, maxCharsPerLine, maxLines) {
+                        const words = String(label).split(/\s+/).filter(Boolean);
+                        const lines = [];
+                        let current = '';
+                        for (let word of words) {
+                            // Hard-break very long words
+                            while (word.length > maxCharsPerLine) {
+                                if (current) { lines.push(current); current = ''; }
+                                if (lines.length >= maxLines) break;
+                                lines.push(word.substring(0, maxCharsPerLine));
+                                word = word.substring(maxCharsPerLine);
+                            }
+                            if (lines.length >= maxLines) break;
+                            if (!current) {
+                                current = word;
+                            } else if ((current + ' ' + word).length <= maxCharsPerLine) {
+                                current = current + ' ' + word;
+                            } else {
+                                lines.push(current);
+                                current = word;
+                            }
+                        }
+                        if (current && lines.length < maxLines) lines.push(current);
+
+                        // If we have leftover content (original longer than what fits),
+                        // add ellipsis to the last line.
+                        const consumed = lines.join(' ').replace(/\s+/g, ' ').trim();
+                        const originalNormalized = String(label).replace(/\s+/g, ' ').trim();
+                        if (consumed.length < originalNormalized.length) {
+                            let last = lines[lines.length - 1] || '';
+                            if (last.length > maxCharsPerLine - 1) {
+                                last = last.substring(0, maxCharsPerLine - 1);
+                            }
+                            lines[lines.length - 1] = last + '…';
+                        }
+                        return lines.join('<br>');
+                    }
+
+                    // Pick wrapping params based on how many bars we need to fit
+                    let maxCharsPerLine, maxLines, bottomMargin;
+                    if (numSubrisks <= 5) {
+                        maxCharsPerLine = 15; maxLines = 2;
+                        bottomMargin = 80;
+                    } else if (numSubrisks <= 10) {
+                        maxCharsPerLine = 12; maxLines = 2;
+                        bottomMargin = 90;
+                    } else if (numSubrisks <= 20) {
+                        maxCharsPerLine = 10; maxLines = 2;
+                        bottomMargin = 100;
+                    } else {
+                        maxCharsPerLine = 8; maxLines = 2;
+                        bottomMargin = 110;
+                    }
+
+                    const xIndices = subriskData.labels.map((_, i) => i);
+                    const displayLabels = subriskData.labels.map(l => wrapLabel(l, maxCharsPerLine, maxLines));
+
                     const subriskTrace = {
-                        x: subriskData.labels.map(l => l.length > 30 ? l.substring(0, 27) + '...' : l),
+                        x: xIndices,
                         y: subriskData.values,
                         type: 'bar',
                         marker: {
                             color: colors[catIndex % colors.length]
                         },
-                        hovertemplate: '<b>%{x}</b><br>Count: %{y}<extra></extra>'
+                        // Use full original labels for tooltip (customdata)
+                        customdata: subriskData.labels,
+                        hovertemplate: '<b>%{customdata}</b><br>Count: %{y}<extra></extra>'
                     };
-                    
+
                     const subriskLayout = {
-                        margin: { t: 20, r: 20, b: 80, l: 60 },
+                        margin: { t: 30, r: 30, b: bottomMargin, l: 70 },
                         xaxis: {
                             title: 'Sub-Risk',
-                            tickangle: -45,
-                            automargin: true
+                            tickmode: 'array',
+                            tickvals: xIndices,
+                            ticktext: displayLabels,
+                            tickangle: 0,
+                            tickfont: { size: numSubrisks > 15 ? 9 : (numSubrisks > 8 ? 10 : 11) },
+                            automargin: true,
+                            range: [-0.6, numSubrisks - 0.4]
                         },
-                        bargap: 0.5,
+                        bargap: numSubrisks > 10 ? 0.25 : 0.4,
                         yaxis: {
                             title: 'Count',
-                            automargin: true
+                            automargin: true,
+                            rangemode: 'tozero',
+                            range: [0, Math.max(...subriskData.values) * 1.2]
                         },
                         paper_bgcolor: 'rgba(0,0,0,0)',
                         plot_bgcolor: 'rgba(0,0,0,0)',
@@ -774,7 +978,7 @@
                             family: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
                         }
                     };
-                    
+
                     Plotly.newPlot(`subrisk-chart-${catIndex}`, [subriskTrace], subriskLayout, {responsive: true});
                 }
             });
@@ -821,7 +1025,8 @@
                 },
                 yaxis: {
                     title: 'Patents with Risks',
-                    automargin: true
+                    automargin: true,
+                    range: [0, Math.max(...timeValues) * 1.2]
                 },
                 paper_bgcolor: 'rgba(0,0,0,0)',
                 plot_bgcolor: 'rgba(0,0,0,0)',
@@ -832,9 +1037,279 @@
             
             Plotly.newPlot('time-chart', [timeTrace], timeLayout, {responsive: true});
         } else {
-            document.getElementById('time-chart').innerHTML = 
+            document.getElementById('time-chart').innerHTML =
                 '<div style="text-align: center; color: #6e6e73; padding: 100px 0;">No time series data available</div>';
         }
+        
+        // Risks structure from server for filtering
+        const risksStructure = {{ risks_structure_json|safe }} || {};
+        
+        function updateRiskFilter() {
+            const selectedCategory = document.querySelector('input[name="risk_category"]:checked').value;
+            const subRiskSelect = document.getElementById('sub-risk-select');
+            const currentUrl = new URL(window.location.href);
+            
+            // Update URL parameters without reloading
+            if (selectedCategory) {
+                currentUrl.searchParams.set('risk_category', selectedCategory);
+            } else {
+                currentUrl.searchParams.delete('risk_category');
+            }
+            currentUrl.searchParams.delete('sub_risk');
+            window.history.pushState({}, '', currentUrl.toString());
+            
+            // Show/hide sub-risk dropdown and populate it
+            if (selectedCategory && risksStructure[selectedCategory]) {
+                subRiskSelect.style.display = 'block';
+                subRiskSelect.innerHTML = '<option value="">-- Select Sub-Risk --</option>';
+                risksStructure[selectedCategory].forEach(function(subrisk) {
+                    const option = document.createElement('option');
+                    option.value = subrisk;
+                    option.textContent = subrisk.length > 80 ? subrisk.substring(0, 77) + '...' : subrisk;
+                    subRiskSelect.appendChild(option);
+                });
+            } else {
+                subRiskSelect.style.display = 'none';
+                subRiskSelect.innerHTML = '<option value="">-- Select Sub-Risk --</option>';
+            }
+            
+            // Show loading overlay and fetch filtered patents via AJAX
+            fetchFilteredPatents(selectedCategory, '');
+        }
+        
+        function updateSubRiskFilter() {
+            const selectedCategory = document.querySelector('input[name="risk_category"]:checked').value;
+            const selectedSubRisk = document.getElementById('sub-risk-select').value;
+            const currentUrl = new URL(window.location.href);
+            
+            if (selectedSubRisk) {
+                currentUrl.searchParams.set('risk_category', selectedCategory);
+                currentUrl.searchParams.set('sub_risk', selectedSubRisk);
+            } else {
+                currentUrl.searchParams.set('risk_category', selectedCategory);
+                currentUrl.searchParams.delete('sub_risk');
+            }
+            
+            window.history.pushState({}, '', currentUrl.toString());
+            
+            // Show loading overlay and fetch filtered patents via AJAX
+            fetchFilteredPatents(selectedCategory, selectedSubRisk);
+        }
+        
+        // Global pagination state
+        let currentPage = 1;
+        let totalPages = 1;
+        let currentRiskCategory = '';
+        let currentSubRisk = '';
+        
+        function fetchFilteredPatents(riskCategory, subRisk, page = 1) {
+            // Show loading overlay
+            const loadingOverlay = document.getElementById('loading-overlay');
+            loadingOverlay.classList.add('active');
+            
+            // Update global state
+            currentRiskCategory = riskCategory;
+            currentSubRisk = subRisk;
+            currentPage = page;
+            
+            // Get search_id from URL if present
+            const urlParams = new URLSearchParams(window.location.search);
+            const searchId = urlParams.get('search_id') || '';
+            
+            // Build the API URL
+            let apiUrl = '/accounts/dashboard/filter/?page=' + page + '&per_page=100';
+            if (riskCategory) {
+                apiUrl += '&risk_category=' + encodeURIComponent(riskCategory);
+            }
+            if (subRisk) {
+                apiUrl += '&sub_risk=' + encodeURIComponent(subRisk);
+            }
+            if (searchId) {
+                apiUrl += '&search_id=' + encodeURIComponent(searchId);
+            }
+            
+            // Fetch filtered patents
+            fetch(apiUrl)
+                .then(response => response.json())
+                .then(data => {
+                    // Update the patent table with filtered results
+                    updatePatentTable(data.patents);
+                    
+                    // Update pagination info
+                    totalPages = data.total_pages || 1;
+                    updatePaginationControls(data.total_count, data.display_count, data.page, data.total_pages);
+                    
+                    // Update URL without reload
+                    const currentUrl = new URL(window.location.href);
+                    currentUrl.searchParams.set('page', page);
+                    if (riskCategory) {
+                        currentUrl.searchParams.set('risk_category', riskCategory);
+                    } else {
+                        currentUrl.searchParams.delete('risk_category');
+                    }
+                    if (subRisk) {
+                        currentUrl.searchParams.set('sub_risk', subRisk);
+                    } else {
+                        currentUrl.searchParams.delete('sub_risk');
+                    }
+                    window.history.pushState({}, '', currentUrl.toString());
+                })
+                .catch(error => {
+                    console.error('Error fetching filtered patents:', error);
+                    alert('Error loading patents. Please try again.');
+                })
+                .finally(() => {
+                    // Hide loading overlay
+                    loadingOverlay.classList.remove('active');
+                });
+        }
+        
+        function updatePaginationControls(total, displayed, page, totalPages) {
+            // Find or create pagination container
+            let paginationContainer = document.getElementById('pagination-controls');
+            if (!paginationContainer) {
+                // Create pagination container after the table
+                const table = document.querySelector('.patent-table');
+                if (table) {
+                    paginationContainer = document.createElement('div');
+                    paginationContainer.id = 'pagination-controls';
+                    paginationContainer.style.cssText = 'display: flex; justify-content: center; align-items: center; gap: 1rem; margin-top: 1.5rem; padding: 1rem;';
+                    table.parentNode.insertBefore(paginationContainer, table.nextSibling);
+                }
+            }
+            
+            if (!paginationContainer) return;
+            
+            let html = '<div style="display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;">';
+            html += '<span style="color: #6e6e73;">Showing ' + displayed + ' of ' + total + ' patents</span>';
+            
+            // Previous button
+            if (page > 1) {
+                html += '<button onclick="goToPage(' + (page - 1) + ')" style="padding: 0.5rem 1rem; background: #0071e3; color: white; border: none; border-radius: 8px; cursor: pointer;">Previous</button>';
+            } else {
+                html += '<button disabled style="padding: 0.5rem 1rem; background: #ccc; color: #666; border: none; border-radius: 8px; cursor: not-allowed;">Previous</button>';
+            }
+            
+            // Page info
+            html += '<span style="font-weight: 600;">Page ' + page + ' of ' + totalPages + '</span>';
+            
+            // Next button
+            if (page < totalPages) {
+                html += '<button onclick="goToPage(' + (page + 1) + ')" style="padding: 0.5rem 1rem; background: #0071e3; color: white; border: none; border-radius: 8px; cursor: pointer;">Next</button>';
+            } else {
+                html += '<button disabled style="padding: 0.5rem 1rem; background: #ccc; color: #666; border: none; border-radius: 8px; cursor: not-allowed;">Next</button>';
+            }
+            
+            // Jump to page
+            html += '<input type="number" id="jump-to-page" min="1" max="' + totalPages + '" value="' + page + '" style="width: 60px; padding: 0.5rem; border: 2px solid rgba(0, 113, 227, 0.2); border-radius: 8px; text-align: center;">';
+            html += '<button onclick="jumpToPage()" style="padding: 0.5rem 1rem; background: #34c759; color: white; border: none; border-radius: 8px; cursor: pointer;">Go</button>';
+            
+            html += '</div>';
+            paginationContainer.innerHTML = html;
+        }
+        
+        function goToPage(page) {
+            fetchFilteredPatents(currentRiskCategory, currentSubRisk, page);
+            // Scroll to top of table
+            const tableCard = document.querySelector('.patent-list-card');
+            if (tableCard) {
+                tableCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+        }
+        
+        function jumpToPage() {
+            const input = document.getElementById('jump-to-page');
+            if (input) {
+                let page = parseInt(input.value);
+                if (page >= 1 && page <= totalPages) {
+                    goToPage(page);
+                } else {
+                    alert('Please enter a valid page number (1-' + totalPages + ')');
+                }
+            }
+        }
+        
+        function updatePatentTable(patents) {
+            const tbody = document.querySelector('.patent-table tbody');
+            if (!tbody) return;
+            
+            if (!patents || patents.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; padding: 2rem; color: #6e6e73;">No patents found matching the selected filter.</td></tr>';
+                return;
+            }
+            
+            let html = '';
+            patents.forEach(function(item) {
+                const title = item.title || 'N/A';
+                const pubDate = item.publication_date ? new Date(item.publication_date).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }) : 'N/A';
+                const pubNumber = item.publication_number || 'N/A';
+                
+                // Build risks badges
+                let risksHtml = '';
+                const risks = item.risks || [];
+                risks.slice(0, 3).forEach(function(risk) {
+                    const riskType = (risk.risk || '').toLowerCase();
+                    let badgeClass = 'unknown';
+                    if (riskType.includes('high')) badgeClass = 'high';
+                    else if (riskType.includes('medium') || riskType.includes('moderate')) badgeClass = 'medium';
+                    else if (riskType.includes('low')) badgeClass = 'low';
+                    
+                    risksHtml += '<span class="risk-badge ' + badgeClass + '">' + (risk.risk || '').substring(0, 20) + '</span>';
+                });
+                if (risks.length > 3) {
+                    risksHtml += '<span class="risk-badge unknown">+' + (risks.length - 3) + ' more</span>';
+                }
+                
+                // Build tags
+                let tagsHtml = '';
+                if (item.has_military) {
+                    tagsHtml += '<span class="tag-badge military">Military</span>';
+                }
+                if (item.has_surveillance) {
+                    tagsHtml += '<span class="tag-badge surveillance">Surveillance</span>';
+                }
+                
+                html += '<tr>';
+                html += '<td><a href="/accounts/patents/' + item.patent_id + '/" class="patent-number">' + pubNumber + '</a></td>';
+                html += '<td class="patent-title" title="' + title.replace(/"/g, '"') + '">' + (title.length > 50 ? title.substring(0, 47) + '...' : title) + '</td>';
+                html += '<td>' + pubDate + '</td>';
+                html += '<td>' + risksHtml + '</td>';
+                html += '<td>' + tagsHtml + '</td>';
+                html += '</tr>';
+            });
+            
+            tbody.innerHTML = html;
+        }
+        
+        // Initialize sub-risk dropdown on page load if category is selected
+        document.addEventListener('DOMContentLoaded', function() {
+            const selectedCategory = '{{ risk_category|escapejs }}';
+            const selectedSubRisk = '{{ sub_risk|escapejs }}';
+            
+            if (selectedCategory && risksStructure[selectedCategory]) {
+                const subRiskSelect = document.getElementById('sub-risk-select');
+                subRiskSelect.style.display = 'block';
+                subRiskSelect.innerHTML = '<option value="">-- Select Sub-Risk --</option>';
+                risksStructure[selectedCategory].forEach(function(subrisk) {
+                    const option = document.createElement('option');
+                    option.value = subrisk;
+                    option.textContent = subrisk.length > 80 ? subrisk.substring(0, 77) + '...' : subrisk;
+                    if (subrisk === selectedSubRisk) {
+                        option.selected = true;
+                    }
+                    subRiskSelect.appendChild(option);
+                });
+            }
+            
+            // Always load via AJAX to get proper pagination
+            const urlParams = new URLSearchParams(window.location.search);
+            const pageParam = urlParams.get('page');
+            const riskCatParam = urlParams.get('risk_category');
+            const subRiskParam = urlParams.get('sub_risk');
+            
+            const page = pageParam ? parseInt(pageParam) : 1;
+            fetchFilteredPatents(riskCatParam || '', subRiskParam || '', page);
+        });
     </script>
 </body>
 </html>

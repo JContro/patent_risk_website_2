@@ -216,8 +216,10 @@ class DashboardCache(models.Model):
     cached_at = models.DateTimeField(auto_now_add=True)
     
     # Cached counts
-    patent_count = models.IntegerField(default=0)
-    risks_count = models.IntegerField(default=0)
+    patent_count = models.IntegerField(default=0)  # Number of analyzed patents
+    total_patent_count = models.IntegerField(default=0)  # Total patents in database
+    risks_count = models.IntegerField(default=0)  # Number of patents with at least one risk
+    total_risks = models.IntegerField(default=0)  # Total number of individual risks
     patents_with_military = models.IntegerField(default=0)
     patents_with_surveillance = models.IntegerField(default=0)
     patents_with_online_manipulation = models.IntegerField(default=0)

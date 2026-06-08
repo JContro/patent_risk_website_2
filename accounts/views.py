@@ -282,21 +282,26 @@ def dashboard(request):
     # If cache exists, use it for fast rendering
     if cache:
         cache_data = cache.cache_data
-        total_patents = cache.patent_count
+        analyzed_patents = cache.patent_count  # Number of analyzed patents
         patents_with_risks = cache.risks_count
+        total_risks = cache.total_risks  # Total number of individual risks
         patents_with_military = cache.patents_with_military
         patents_with_surveillance = cache.patents_with_surveillance
         patents_with_online_manipulation = cache.patents_with_online_manipulation
         
         # Get total patents in search (need to recalculate for this)
-        total_patents_in_search = _get_total_patents_for_search(selected_search, selected_search_id)
+        # Use cached total if available, otherwise calculate
+        if not selected_search_id and cache.total_patent_count:
+            total_patents_in_search = cache.total_patent_count
+        else:
+            total_patents_in_search = _get_total_patents_for_search(selected_search, selected_search_id)
         
         # Calculate percentages
-        if total_patents > 0:
-            military_percentage = round((patents_with_military / total_patents) * 100, 1)
-            surveillance_percentage = round((patents_with_surveillance / total_patents) * 100, 1)
-            online_manipulation_percentage = round((patents_with_online_manipulation / total_patents) * 100, 1)
-            risks_percentage = round((patents_with_risks / total_patents) * 100, 1)
+        if analyzed_patents > 0:
+            military_percentage = round((patents_with_military / analyzed_patents) * 100, 1)
+            surveillance_percentage = round((patents_with_surveillance / analyzed_patents) * 100, 1)
+            online_manipulation_percentage = round((patents_with_online_manipulation / analyzed_patents) * 100, 1)
+            risks_percentage = round((patents_with_risks / analyzed_patents) * 100, 1)
         else:
             military_percentage = 0
             surveillance_percentage = 0
@@ -342,13 +347,52 @@ def dashboard(request):
                 'has_surveillance': p.get('has_surveillance', False),
             })
         
+        # Get risk filtering parameters
+        risk_category = request.GET.get('risk_category', '')
+        sub_risk = request.GET.get('sub_risk', '')
+        
+        # Build subrisk_to_category mapping for filtering
+        risks_structure = getattr(settings, 'EU_AI_RISKS_STRUCTURE', {})
+        subrisk_to_category = {}
+        for category, subrisks in risks_structure.items():
+            for subrisk in subrisks:
+                subrisk_to_category[subrisk.lower()] = category
+        
+        # Filter patent_risk_data based on risk category and sub-risk
+        filtered_patent_risk_data = patent_risk_data
+        if risk_category:
+            filtered_patent_risk_data = []
+            for p in patent_risk_data:
+                if not p.get('has_risks'):
+                    continue
+                risks = p.get('risks', [])
+                if not risks:
+                    continue
+                
+                # Check if any risk matches the selected category/sub-risk
+                for risk in risks:
+                    risk_type = risk.get('risk', '').lower()
+                    
+                    if sub_risk:
+                        # Filter by specific sub-risk
+                        if sub_risk.lower() in risk_type or risk_type in sub_risk.lower():
+                            filtered_patent_risk_data.append(p)
+                            break
+                    else:
+                        # Filter by high-level category
+                        # Check if the risk_type maps to the selected category
+                        mapped_category = subrisk_to_category.get(risk_type, '')
+                        if mapped_category.lower() == risk_category.lower():
+                            filtered_patent_risk_data.append(p)
+                            break
+        
         context = {
             'user': request.user,
             'saved_searches': searches_with_display,
             'selected_search': selected_search,
-            'total_patents': total_patents,
+            'total_patents': analyzed_patents,
             'patents_with_risks': patents_with_risks,
-            'total_risks': patents_with_risks,
+            'total_risks': total_risks,
             'patents_with_military': patents_with_military,
             'patents_with_surveillance': patents_with_surveillance,
             'patents_with_online_manipulation': patents_with_online_manipulation,
@@ -366,8 +410,11 @@ def dashboard(request):
             'stacked_values_json': json.dumps(cache_data.get('stacked_values', [])),
             'category_totals_json': json.dumps(cache_data.get('category_totals', {})),
             'category_subrisk_data_json': json.dumps(cache_data.get('category_subrisk_data', {})),
-            'patent_risk_data': patent_risk_data,
+            'patent_risk_data': filtered_patent_risk_data,
             'cache_status': f'Cached at {cache.cached_at.strftime("%Y-%m-%d %H:%M:%S")}' if cache else 'No cache',
+            'risk_category': risk_category,
+            'sub_risk': sub_risk,
+            'risks_structure_json': json.dumps(risks_structure),
         }
         return render(request, 'accounts/dashboard.html', context)
     
@@ -392,7 +439,109 @@ def _get_total_patents_for_search(selected_search, selected_search_id):
     
     if q:
         return Patent.objects.filter(q).distinct().count()
-    return Analysis.objects.count()
+    # When no search filter, return total patents in database (not just analyzed)
+    return Patent.objects.count()
+
+
+@login_required
+def dashboard_filter(request):
+    """
+    AJAX endpoint for filtering patents by risk category/sub-risk.
+    Returns JSON response with filtered patent data.
+    """
+    from django.http import JsonResponse
+    
+    # Get filter parameters
+    risk_category = request.GET.get('risk_category', '')
+    sub_risk = request.GET.get('sub_risk', '')
+    search_id = request.GET.get('search_id', '')
+    
+    # Get the cache
+    cache = None
+    selected_search = None
+    
+    if search_id:
+        try:
+            selected_search = SavedSearch.objects.get(id=search_id, user=request.user)
+            cache = DashboardCache.objects.filter(user=request.user, saved_search=selected_search).first()
+        except SavedSearch.DoesNotExist:
+            selected_search = None
+    else:
+        cache = DashboardCache.objects.filter(user=request.user, saved_search=None, is_global=True).first()
+    
+    if not cache:
+        return JsonResponse({'error': 'No cache available', 'patents': []}, status=404)
+    
+    cache_data = cache.cache_data
+    
+    # Reconstruct patent_risk_data from cache
+    patent_risk_data = []
+    for p in cache_data.get('patent_risk_data', []):
+        patent_risk_data.append({
+            'patent_id': p.get('patent_id'),
+            'publication_number': p.get('publication_number', ''),
+            'title': p.get('title', ''),
+            'publication_date': p.get('publication_date'),
+            'risks': p.get('risks', []),
+            'has_risks': p.get('has_risks', False),
+            'has_military': p.get('has_military', False),
+            'has_surveillance': p.get('has_surveillance', False),
+        })
+    
+    # Build subrisk_to_category mapping for filtering
+    risks_structure = getattr(settings, 'EU_AI_RISKS_STRUCTURE', {})
+    subrisk_to_category = {}
+    for category, subrisks in risks_structure.items():
+        for subrisk in subrisks:
+            subrisk_to_category[subrisk.lower()] = category
+    
+    # Filter patent_risk_data based on risk category and sub-risk
+    filtered_patent_risk_data = []
+    if risk_category:
+        for p in patent_risk_data:
+            if not p.get('has_risks'):
+                continue
+            risks = p.get('risks', [])
+            if not risks:
+                continue
+            
+            # Check if any risk matches the selected category/sub-risk
+            for risk in risks:
+                risk_type = risk.get('risk', '').lower()
+                
+                if sub_risk:
+                    # Filter by specific sub-risk
+                    if sub_risk.lower() in risk_type or risk_type in sub_risk.lower():
+                        filtered_patent_risk_data.append(p)
+                        break
+                else:
+                    # Filter by high-level category
+                    mapped_category = subrisk_to_category.get(risk_type, '')
+                    if mapped_category.lower() == risk_category.lower():
+                        filtered_patent_risk_data.append(p)
+                        break
+    else:
+        # No filter - return all patents with risks
+        filtered_patent_risk_data = [p for p in patent_risk_data if p.get('has_risks')]
+    
+    # Get pagination parameters
+    page = int(request.GET.get('page', 1))
+    per_page = int(request.GET.get('per_page', 100))
+    
+    # Calculate pagination
+    total_count = len(filtered_patent_risk_data)
+    start_idx = (page - 1) * per_page
+    end_idx = start_idx + per_page
+    paginated_patents = filtered_patent_risk_data[start_idx:end_idx]
+    
+    return JsonResponse({
+        'patents': paginated_patents,
+        'total_count': total_count,
+        'display_count': len(paginated_patents),
+        'page': page,
+        'per_page': per_page,
+        'total_pages': (total_count + per_page - 1) // per_page,
+    })
 
 
 def _dashboard_compute(request, saved_searches, selected_search_id, selected_search):
@@ -609,6 +758,44 @@ def _dashboard_compute(request, saved_searches, selected_search_id, selected_sea
             'display_name': display_name[:50],
         })
     
+    # Get risk filtering parameters
+    risk_category = request.GET.get('risk_category', '')
+    sub_risk = request.GET.get('sub_risk', '')
+    
+    # Build subrisk_to_category mapping for filtering
+    subrisk_to_category = {}
+    for category, subrisks in risks_structure.items():
+        for subrisk in subrisks:
+            subrisk_to_category[subrisk.lower()] = category
+    
+    # Filter patent_risk_data based on risk category and sub-risk
+    filtered_patent_risk_data = patent_risk_data[:50]
+    if risk_category:
+        filtered_patent_risk_data = []
+        for p in patent_risk_data:
+            if not p.get('has_risks'):
+                continue
+            risks = p.get('risks', [])
+            if not risks:
+                continue
+            
+            # Check if any risk matches the selected category/sub-risk
+            for risk in risks:
+                risk_type = risk.get('risk', '').lower()
+                
+                if sub_risk:
+                    # Filter by specific sub-risk
+                    if sub_risk.lower() in risk_type or risk_type in sub_risk.lower():
+                        filtered_patent_risk_data.append(p)
+                        break
+                else:
+                    # Filter by high-level category
+                    if risk_category.lower() in subrisk_to_category:
+                        mapped_category = subrisk_to_category.get(risk_type, '')
+                        if mapped_category.lower() == risk_category.lower():
+                            filtered_patent_risk_data.append(p)
+                            break
+    
     context = {
         'user': request.user,
         'saved_searches': searches_with_display,
@@ -632,8 +819,11 @@ def _dashboard_compute(request, saved_searches, selected_search_id, selected_sea
         'stacked_values_json': json.dumps(stacked_values),
         'category_totals_json': json.dumps(category_totals),
         'category_subrisk_data_json': json.dumps(category_subrisk_data),
-        'patent_risk_data': patent_risk_data[:50],
+        'patent_risk_data': filtered_patent_risk_data,
         'cache_status': 'No cache - computed fresh',
+        'risk_category': risk_category,
+        'sub_risk': sub_risk,
+        'risks_structure_json': json.dumps(risks_structure),
     }
     
     return render(request, 'accounts/dashboard.html', context)
@@ -855,7 +1045,7 @@ def recalculate_cache(request):
         'risk_values': list(risk_counts.values()),
         'time_labels': sorted(risks_by_month.keys()),
         'time_values': [risks_by_month[m] for m in sorted(risks_by_month.keys())],
-        'patent_risk_data': patent_risk_data[:50],  # Limit to 50
+        'patent_risk_data': patent_risk_data,  # Store ALL patents with risks
         'stacked_categories': stacked_categories,
         'stacked_labels': stacked_labels,
         'stacked_values': stacked_values,
@@ -863,11 +1053,13 @@ def recalculate_cache(request):
         'category_subrisk_data': category_subrisk_data,
     }
     
-    # Update cache
+    # Update cache - store both analyzed count and total patent count
     cache.cache_data = cache_data
     cache.cached_at = timezone.now()
-    cache.patent_count = total_patents
-    cache.risks_count = total_risks
+    cache.patent_count = total_patents  # This is analyzed patents count
+    cache.total_patent_count = Patent.objects.count()  # Total patents in database
+    cache.risks_count = patents_with_risks  # Number of patents with at least one risk
+    cache.total_risks = total_risks  # Total number of individual risks
     cache.patents_with_military = patents_with_military
     cache.patents_with_surveillance = patents_with_surveillance
     cache.patents_with_online_manipulation = patents_with_online_manipulation
@@ -877,7 +1069,8 @@ def recalculate_cache(request):
         'success': True,
         'cached_at': cache.cached_at.isoformat(),
         'patent_count': total_patents,
-        'risks_count': total_risks,
+        'risks_count': patents_with_risks,
+        'total_risks': total_risks,
         'patents_with_military': patents_with_military,
         'patents_with_surveillance': patents_with_surveillance,
         'patents_with_online_manipulation': patents_with_online_manipulation,
@@ -1461,3 +1654,77 @@ def analyse_all_patents(request):
         return redirect(url)
     
     return redirect('search_patents')
+
+
+@login_required
+def risk_categories(request):
+    """
+    Display a page showing all risk categories and their descriptions.
+    This includes the risk categories from EU AI Act (EU_AI_RISKS_STRUCTURE in settings).
+    """
+    from django.conf import settings
+    
+    # Get the risk structure from settings
+    eu_ai_risks = getattr(settings, 'EU_AI_RISKS_STRUCTURE', {})
+    
+    # Define colors and icons for each category
+    category_styles = {
+        'Unacceptable': {
+            'color': '#dc2626',
+            'icon': '⚠️',
+            'description': 'AI systems that pose unacceptable risks and are prohibited under the EU AI Act.'
+        },
+        'High Risk': {
+            'color': '#ea580c',
+            'icon': '🔴',
+            'description': 'AI systems that pose high risks to health, safety, or fundamental rights and require strict compliance.'
+        },
+        'General High Risks': {
+            'color': '#f59e0b',
+            'icon': '⚡',
+            'description': 'General high risks related to health, safety, and fundamental rights.'
+        },
+        'Human Rights': {
+            'color': '#eab308',
+            'icon': '🛡️',
+            'description': 'Risks to fundamental human rights as protected by international law.'
+        },
+        'Online Manipulation': {
+            'color': '#7c3aed',
+            'icon': '🎭',
+            'description': 'AI systems that manipulate human behavior in ways that exploit vulnerabilities.'
+        },
+    }
+    
+    # Build the risk categories data from settings
+    risk_categories_data = []
+    for category_name, sub_risks in eu_ai_risks.items():
+        style = category_styles.get(category_name, {'color': '#6b7280', 'icon': '📋', 'description': ''})
+        
+        # Convert sub-risks to sub-categories format
+        sub_categories = []
+        for risk in sub_risks:
+            # Clean up the risk name - remove "Online Manipulation: " prefix if present
+            if ': ' in risk:
+                parts = risk.split(': ', 1)
+                name = parts[1] if len(parts) > 1 else risk
+            else:
+                name = risk
+            sub_categories.append({
+                'name': name,
+                'description': ''  # The risk name itself serves as the description
+            })
+        
+        risk_categories_data.append({
+            'name': category_name,
+            'description': style['description'],
+            'color': style['color'],
+            'icon': style['icon'],
+            'sub_categories': sub_categories
+        })
+    
+    context = {
+        'risk_categories': risk_categories_data,
+    }
+    
+    return render(request, 'accounts/risk_categories.html', context)

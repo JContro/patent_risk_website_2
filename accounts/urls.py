@@ -25,4 +25,6 @@ urlpatterns = [
     path('search/delete/<int:search_id>/', views.delete_saved_search, name='delete_saved_search'),
     path('search/analyse-all/', views.analyse_all_patents, name='analyse_all_patents'),
     path('dashboard/recalculate/', views.recalculate_cache, name='recalculate_cache'),
+    path('dashboard/filter/', views.dashboard_filter, name='dashboard_filter'),
+    path('risk-categories/', views.risk_categories, name='risk_categories'),
 ]
