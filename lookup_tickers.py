@@ -156,17 +156,31 @@ def extract_distinct_organizations():
 def ensure_entity_records(org_names, *, entity_type='applicant'):
     """
     Create Entity records for organization names that don't exist yet.
+
+    Handles case-variant dedup: if "Apple Inc." and "APPLE INC." both exist,
+    the first one encountered is kept and subsequent variants are skipped.
+    Also merges existing case-variant duplicates before creating new records.
+
     Returns the count of newly created records.
     """
     print(f"[2/4] Ensuring Entity records exist (type={entity_type})...")
-    existing = set(Entity.objects.filter(entity_type=entity_type)
-                   .values_list('name', flat=True))
-    existing = {n.upper() for n in existing}
 
+    # ---- Merge any existing case-variant duplicates ----
+    _merge_case_duplicates(entity_type)
+
+    # ---- Build set of existing names (case-insensitive) ----
+    existing = set(
+        Entity.objects.filter(entity_type=entity_type)
+        .values_list('name', flat=True)
+    )
+    existing_upper = {n.upper() for n in existing}
+
+    # ---- Create only truly new names ----
     to_create = []
-    for name in org_names:
-        if name.upper() not in existing:
-            to_create.append(Entity(name=name, entity_type=entity_type))
+    for org_name in org_names:
+        if org_name.upper() not in existing_upper:
+            existing_upper.add(org_name.upper())
+            to_create.append(Entity(name=org_name, entity_type=entity_type))
 
     if to_create:
         Entity.objects.bulk_create(to_create, batch_size=500, ignore_conflicts=True)
@@ -174,7 +188,68 @@ def ensure_entity_records(org_names, *, entity_type='applicant'):
     else:
         print("  No new Entity records needed")
 
+    # ---- Final sanity: print duplicate count ----
+    _report_duplicates(entity_type)
+
     return len(to_create)
+
+
+def _merge_case_duplicates(entity_type='applicant'):
+    """
+    Merge case-variant duplicate Entity records.
+    Keeps the record with the shortest name (usually the most normalized form)
+    and reassigns any patents from duplicates to the kept record.
+    """
+    from django.db.models.functions import Lower
+    from django.db.models import Count
+
+    dupes = (
+        Entity.objects.filter(entity_type=entity_type)
+        .annotate(lower_name=Lower('name'))
+        .values('lower_name')
+        .annotate(c=Count('entity_id'))
+        .filter(c__gt=1)
+    )
+
+    merged_count = 0
+    for group in dupes:
+        variants = list(
+            Entity.objects.filter(entity_type=entity_type, name__iexact=group['lower_name'])
+            .order_by('name')  # deterministic order
+        )
+        if len(variants) <= 1:
+            continue
+
+        # Keep the record with the shortest name (usually the most canonical)
+        # or, if tied, the alphabetically first
+        keeper = min(variants, key=lambda e: (len(e.name), e.name))
+        to_delete = [e for e in variants if e.entity_id != keeper.entity_id]
+
+        for dup in to_delete:
+            # Reassign M2M relations
+            for patent in dup.patents.all():
+                keeper.patents.add(patent)
+            for search in dup.searches.all():
+                keeper.searches.add(search)
+            dup.delete()
+            merged_count += 1
+
+    if merged_count:
+        print(f"  Merged {merged_count} case-variant duplicate entities")
+
+
+def _report_duplicates(entity_type='applicant'):
+    """Print a count of remaining exact-name duplicates (should be 0)."""
+    from django.db.models import Count
+    exact_dupes = (
+        Entity.objects.filter(entity_type=entity_type)
+        .values('name')
+        .annotate(c=Count('entity_id'))
+        .filter(c__gt=1)
+    )
+    if exact_dupes.count() > 0:
+        print(f"  WARNING: {exact_dupes.count()} exact duplicate names remain "
+              f"(unique_together constraint may not be enforced on SQLite)")
 
 
 def get_entities_without_tickers(*, entity_type='applicant', limit=None):
