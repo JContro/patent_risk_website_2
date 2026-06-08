@@ -18,6 +18,10 @@ docker compose up --build -d
 
 3. Access the admin panel at: http://localhost:8080/admin
 
+4. run cloudflare: 
+```bash
+docker run -d --add-host=host.docker.internal:host-gateway cloudflare/cloudflared:latest tunnel --no-autoupdate --url http://host.docker.internal:8080
+```
 ## Useful Commands
 
 Run migrations:

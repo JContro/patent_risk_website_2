@@ -126,7 +126,10 @@ class Entity(models.Model):
     
     # Entity type
     entity_type = models.CharField(max_length=20, choices=ENTITY_TYPE_CHOICES, db_index=True)
-    
+
+    # Stock ticker symbol (for publicly traded companies)
+    ticker = models.CharField(max_length=10, blank=True, null=True, db_index=True)
+
     # Many-to-many relationship with patents
     patents = models.ManyToManyField(Patent, related_name='entities')
     

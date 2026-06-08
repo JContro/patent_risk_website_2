@@ -148,6 +148,7 @@ def send_verification_email(request, user):
         'domain': current_site.domain,
         'uid': uid,
         'token': token,
+        'protocol': 'https' if request.is_secure() else 'http',
     })
     
     # In production, use real email settings

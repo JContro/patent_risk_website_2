@@ -13,6 +13,20 @@ DEBUG = True
 
 ALLOWED_HOSTS = ['*']
 
+# Allow Cloudflare Tunnel subdomains for CSRF origin checking
+CSRF_TRUSTED_ORIGINS = ['https://*.trycloudflare.com']
+
+# HTTPS/SSL settings — only apply when DEBUG=False (production via Cloudflare Tunnel)
+# Cloudflare terminates SSL at the edge and forwards HTTP to port 8080
+if not DEBUG:
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+    SECURE_SSL_REDIRECT = True
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_HSTS_SECONDS = 31536000
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
+
 INSTALLED_APPS = [
     'django.contrib.admin',
     'django.contrib.auth',
