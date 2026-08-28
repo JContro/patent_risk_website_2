@@ -191,6 +191,7 @@ class SavedSearch(models.Model):
     inventor = models.CharField(max_length=255, blank=True, null=True)
     applicant = models.CharField(max_length=255, blank=True, null=True)
     assignee = models.CharField(max_length=255, blank=True, null=True)
+    ticker = models.CharField(max_length=10, blank=True, null=True, help_text="Stock ticker symbol")
     
     # Timestamp
     created_at = models.DateTimeField(auto_now_add=True)

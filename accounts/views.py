@@ -314,6 +314,8 @@ def dashboard(request):
         for search in saved_searches:
             if search.name:
                 display_name = search.name
+            elif search.ticker:
+                display_name = f"Ticker: {search.ticker}"
             elif search.applicant:
                 display_name = f"Applicant: {search.applicant}"
             elif search.assignee:
@@ -387,6 +389,12 @@ def dashboard(request):
                             filtered_patent_risk_data.append(p)
                             break
         
+        # Paginate the initial server-rendered table (20 per page)
+        from django.core.paginator import Paginator
+        paginator = Paginator(filtered_patent_risk_data, 20)
+        page_number = int(request.GET.get('page', 1))
+        page_obj = paginator.get_page(page_number)
+
         context = {
             'user': request.user,
             'saved_searches': searches_with_display,
@@ -411,7 +419,12 @@ def dashboard(request):
             'stacked_values_json': json.dumps(cache_data.get('stacked_values', [])),
             'category_totals_json': json.dumps(cache_data.get('category_totals', {})),
             'category_subrisk_data_json': json.dumps(cache_data.get('category_subrisk_data', {})),
-            'patent_risk_data': filtered_patent_risk_data,
+            'patent_risk_data': page_obj.object_list,
+            'paginator': paginator,
+            'page_obj': page_obj,
+            'page': page_number,
+            'total_patent_count': len(filtered_patent_risk_data),
+            'total_pages': paginator.num_pages,
             'cache_status': f'Cached at {cache.cached_at.strftime("%Y-%m-%d %H:%M:%S")}' if cache else 'No cache',
             'risk_category': risk_category,
             'sub_risk': sub_risk,
@@ -1221,9 +1234,10 @@ def analyse_patent(request, patent_id):
 
 def autocomplete_entities(request):
     """
-    Autocomplete view for searching inventors, applicants, and assignees.
-    Returns JSON list of matching entity names.
-    Searches both the Entity table and Patent JSON fields for comprehensive results.
+    Autocomplete view for searching inventors, applicants, assignees, and tickers.
+    Returns JSON list of matching entity names or ticker symbols.
+    When type='ticker', searches Entity.ticker fields; otherwise searches
+    the Entity table and Patent JSON fields for comprehensive results.
     """
     query = request.GET.get('q', '')
     entity_type = request.GET.get('type', 'all')  # 'inventor', 'applicant', 'assignee', or 'all'
@@ -1234,7 +1248,18 @@ def autocomplete_entities(request):
     results = set()
     
     # Search in Entity table first
-    if entity_type == 'all':
+    if entity_type == 'ticker':
+        # Search ticker symbols
+        tickers = Entity.objects.exclude(
+            ticker__isnull=True
+        ).exclude(
+            ticker=''
+        ).filter(
+            Q(ticker__icontains=query)
+        ).distinct().values_list('ticker', flat=True)[:10]
+        for t in tickers:
+            results.add(t.upper())
+    elif entity_type == 'all':
         entities = Entity.objects.filter(
             Q(name__icontains=query)
         ).distinct().values_list('name', flat=True)[:10]
@@ -1243,9 +1268,11 @@ def autocomplete_entities(request):
             Q(name__icontains=query) & Q(entity_type=entity_type)
         ).distinct().values_list('name', flat=True)[:10]
     
-    for e in entities:
-        results.add(e)
-    
+    # Skip entity name iteration for ticker searches (already handled above)
+    if entity_type != 'ticker':
+        for e in entities:
+            results.add(e)
+
     # Also search in Patent JSON fields for inventors and applicants
     if entity_type in ['all', 'inventor']:
         # Search inventors in Patent model
@@ -1303,12 +1330,13 @@ def search_patents(request):
     inventor = request.GET.get('inventor', '')
     applicant = request.GET.get('applicant', '')
     assignee = request.GET.get('assignee', '')  # Owner
+    ticker = request.GET.get('ticker', '')  # Stock ticker symbol
     date_from = request.GET.get('date_from', '')
     date_to = request.GET.get('date_to', '')
-    
+
     # Check if any search parameters are provided
-    has_search = query or inventor or applicant or assignee or date_from or date_to
-    
+    has_search = query or inventor or applicant or assignee or ticker or date_from or date_to
+
     # Get saved searches for the user if authenticated
     saved_searches = []
     current_saved_search = None
@@ -1317,10 +1345,11 @@ def search_patents(request):
         # Check if current search matches any saved search
         for saved in saved_searches:
             if (saved.query == query and saved.inventor == inventor and
-                saved.applicant == applicant and saved.assignee == assignee):
+                saved.applicant == applicant and saved.assignee == assignee and
+                saved.ticker == ticker):
                 current_saved_search = saved
                 break
-    
+
     if not has_search:
         # Show search form (empty)
         return render(request, 'accounts/search.html', {
@@ -1328,6 +1357,7 @@ def search_patents(request):
             'search_inventor': '',
             'search_applicant': '',
             'search_assignee': '',
+            'search_ticker': '',
             'date_from': '',
             'date_to': '',
             'saved_searches': saved_searches,
@@ -1375,6 +1405,15 @@ def search_patents(request):
                 entities__entity_type='assignee'
             ).distinct()
     
+    # Filter by ticker symbol (matches against Entity.ticker)
+    if ticker:
+        ticker_list = [t.strip().upper() for t in ticker.split(',') if t.strip()]
+        if ticker_list:
+            ticker_q = Q()
+            for t in ticker_list:
+                ticker_q |= Q(entities__ticker__iexact=t)
+            patents = patents.filter(ticker_q).distinct()
+
     # Filter by date range
     if date_from:
         try:
@@ -1382,7 +1421,7 @@ def search_patents(request):
             patents = patents.filter(publication_date__gte=from_date)
         except ValueError:
             pass  # Invalid date format, ignore
-    
+
     if date_to:
         try:
             to_date = datetime.strptime(date_to, '%Y-%m-%d').date()
@@ -1411,6 +1450,7 @@ def search_patents(request):
         'search_inventor': inventor,
         'search_applicant': applicant,
         'search_assignee': assignee,
+        'search_ticker': ticker,
         'date_from': date_from,
         'date_to': date_to,
         'saved_searches': saved_searches,
@@ -1428,13 +1468,14 @@ def save_search(request):
         inventor = request.POST.get('inventor', '')
         applicant = request.POST.get('applicant', '')
         assignee = request.POST.get('assignee', '')
+        ticker = request.POST.get('ticker', '')
         name = request.POST.get('name', '')
-        
+
         # Check if at least one search parameter is provided
-        if not (query or inventor or applicant or assignee):
+        if not (query or inventor or applicant or assignee or ticker):
             messages.error(request, 'Please provide at least one search parameter.')
             return redirect('search_patents')
-        
+
         # Create the saved search
         saved_search = SavedSearch.objects.create(
             user=request.user,
@@ -1443,10 +1484,11 @@ def save_search(request):
             inventor=inventor,
             applicant=applicant,
             assignee=assignee,
+            ticker=ticker,
         )
-        
+
         messages.success(request, 'Search saved successfully!')
-        
+
         # Redirect back to the search results
         params = {}
         if query:
@@ -1457,6 +1499,8 @@ def save_search(request):
             params['applicant'] = applicant
         if assignee:
             params['assignee'] = assignee
+        if ticker:
+            params['ticker'] = ticker
         
         url = reverse('patent_list')
         if params:

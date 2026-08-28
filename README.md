@@ -17,11 +17,63 @@ docker compose up --build -d
 2. Access the application at: http://localhost:8080
 
 3. Access the admin panel at: http://localhost:8080/admin
+## Exposing via Cloudflare Tunnel (Custom Domain)
 
-4. run cloudflare: 
+This project uses a **named Cloudflare Tunnel** to expose the app at a custom domain instead of localhost. Setup only needs to be done once; after that, the tunnel can be started/stopped like any other container.
+
+### One-time setup
+
+1. Create a local folder for tunnel credentials:
 ```bash
-docker run -d --add-host=host.docker.internal:host-gateway cloudflare/cloudflared:latest tunnel --no-autoupdate --url http://host.docker.internal:8080
+mkdir -p cloudflared
 ```
+
+2. Authenticate with Cloudflare (opens a browser link to authorize your domain):
+```bash
+docker run -it --rm -v $(pwd)/cloudflared:/home/nonroot/.cloudflared cloudflare/cloudflared:latest tunnel login
+```
+   > If you hit a `permission denied` error writing `cert.pem`, fix ownership of the folder first:
+   > ```bash
+   > sudo chown -R $(id -u):$(id -g) cloudflared
+   > ```
+
+3. Create the named tunnel:
+```bash
+docker run -it --rm -v $(pwd)/cloudflared:/home/nonroot/.cloudflared cloudflare/cloudflared:latest tunnel create django-app
+```
+   This prints a **Tunnel UUID** and writes a credentials `.json` file into `cloudflared/`.
+
+4. Create `cloudflared/config.yml`:
+```yaml
+tunnel: <YOUR-TUNNEL-UUID>
+credentials-file: /home/nonroot/.cloudflared/<YOUR-TUNNEL-UUID>.json
+
+ingress:
+  - hostname: yourdomain.com
+    service: http://host.docker.internal:8080
+  - hostname: www.yourdomain.com
+    service: http://host.docker.internal:8080
+  - service: http_status:404
+```
+
+5. Route DNS to the tunnel (creates CNAME records automatically in Cloudflare):
+```bash
+docker run -it --rm -v $(pwd)/cloudflared:/home/nonroot/.cloudflared cloudflare/cloudflared:latest tunnel route dns django-app yourdomain.com
+docker run -it --rm -v $(pwd)/cloudflared:/home/nonroot/.cloudflared cloudflare/cloudflared:latest tunnel route dns django-app www.yourdomain.com
+```
+
+6. Add your domain(s) to `ALLOWED_HOSTS` in `config/settings.py`, or requests through the tunnel will get a 400 error.
+
+### Running the tunnel
+
+```bash
+docker run -d --restart unless-stopped --add-host=host.docker.internal:host-gateway -v $(pwd)/cloudflared:/home/nonroot/.cloudflared cloudflare/cloudflared:latest tunnel run django-app
+```
+
+Your app will then be available at `https://yourdomain.com` in addition to `http://localhost:8080`.
+
+> **Note:** Keep the `cloudflared/` folder (cert + credentials) out of version control — it's already covered by `.gitignore`/`.dockerignore`.
+
 ## Useful Commands
 
 Run migrations:

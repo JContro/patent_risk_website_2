@@ -526,7 +526,19 @@
                             </div>
                             <div class="autocomplete-suggestions" id="owner-suggestions"></div>
                         </div>
-                        
+
+                        <!-- Ticker Search with Tags -->
+                        <div class="search-field">
+                            <label>Stock Ticker</label>
+                            <div class="tag-input-container" id="ticker-container">
+                                <div class="tags-list" id="ticker-tags"></div>
+                                <input type="text" id="ticker-search"
+                                       placeholder="e.g. AAPL, MSFT, GOOGL..." autocomplete="off">
+                                <input type="hidden" name="ticker" id="ticker-hidden" value="{{ search_ticker|default:'' }}">
+                            </div>
+                            <div class="autocomplete-suggestions" id="ticker-suggestions"></div>
+                        </div>
+
                         <!-- Date Range Search -->
                         <div class="search-field" style="display: flex; gap: 1rem;">
                             <div style="flex: 1;">
@@ -558,7 +570,7 @@
                         <div class="saved-search-list">
                             {% for saved in saved_searches %}
                                 <div class="saved-search-item">
-                                    <a href="{% url 'search_patents' %}?{% if saved.query %}q={{ saved.query }}{% if saved.inventor or saved.applicant or saved.assignee %}&{% endif %}{% endif %}{% if saved.inventor %}inventor={{ saved.inventor }}{% if saved.applicant or saved.assignee %}&{% endif %}{% endif %}{% if saved.applicant %}applicant={{ saved.applicant }}{% if saved.assignee %}&{% endif %}{% endif %}{% if saved.assignee %}assignee={{ saved.assignee }}{% endif %}" class="saved-search-link" title="{{ saved.query|default:'' }} {{ saved.inventor|default:'' }} {{ saved.applicant|default:'' }} {{ saved.assignee|default:'' }}">
+                                    <a href="{% url 'search_patents' %}?{% if saved.query %}q={{ saved.query }}{% if saved.inventor or saved.applicant or saved.assignee or saved.ticker %}&{% endif %}{% endif %}{% if saved.inventor %}inventor={{ saved.inventor }}{% if saved.applicant or saved.assignee or saved.ticker %}&{% endif %}{% endif %}{% if saved.applicant %}applicant={{ saved.applicant }}{% if saved.assignee or saved.ticker %}&{% endif %}{% endif %}{% if saved.assignee %}assignee={{ saved.assignee }}{% if saved.ticker %}&{% endif %}{% endif %}{% if saved.ticker %}ticker={{ saved.ticker }}{% endif %}" class="saved-search-link" title="{{ saved.query|default:'' }} {{ saved.inventor|default:'' }} {{ saved.applicant|default:'' }} {{ saved.assignee|default:'' }} {{ saved.ticker|default:'' }}">
                                         {% if saved.name %}
                                             {{ saved.name }}
                                         {% elif saved.query %}
@@ -569,6 +581,8 @@
                                             Applicant: {{ saved.applicant|truncatechars:15 }}
                                         {% elif saved.assignee %}
                                             Assignee: {{ saved.assignee|truncatechars:15 }}
+                                        {% elif saved.ticker %}
+                                            Ticker: {{ saved.ticker|truncatechars:10 }}
                                         {% else %}
                                             Search {{ forloop.counter }}
                                         {% endif %}
@@ -786,6 +800,21 @@
                     ownerTags,
                     ownerHidden,
                     'assignee'
+                );
+            }
+
+            // Ticker tags
+            const tickerInput = document.getElementById('ticker-search');
+            const tickerSuggestions = document.getElementById('ticker-suggestions');
+            const tickerTags = document.getElementById('ticker-tags');
+            const tickerHidden = document.getElementById('ticker-hidden');
+            if (tickerInput) {
+                new TagAutocomplete(
+                    tickerInput,
+                    tickerSuggestions,
+                    tickerTags,
+                    tickerHidden,
+                    'ticker'
                 );
             }
         });

@@ -742,7 +742,7 @@
                         <option value="">-- Select Sub-Risk --</option>
                     </select>
                     {% if risk_category or sub_risk %}
-                    <a href="?{% if selected_search %}search_id={{ selected_search.id }}&{% endif %}risk_category={{ risk_category|urlencode }}" class="clear-filter-btn" style="padding: 0.5rem 1rem; background: #ff3b30; color: white; border-radius: 8px; text-decoration: none; font-size: 0.9rem; font-weight: 500;">Clear Filter</a>
+                    <a href="?{% if selected_search %}search_id={{ selected_search.id }}&{% endif %}risk_category={{ risk_category|urlencode }}&page=1" class="clear-filter-btn" style="padding: 0.5rem 1rem; background: #ff3b30; color: white; border-radius: 8px; text-decoration: none; font-size: 0.9rem; font-weight: 500;">Clear Filter</a>
                     {% endif %}
                 </div>
             </div>
@@ -795,10 +795,43 @@
                             {% endif %}
                         </td>
                     </tr>
+                    {% else %}
+                    {% if forloop.first and not patent_risk_data %}
+                    <tr>
+                        <td colspan="5" style="text-align: center; padding: 2rem; color: #6e6e73;">No patents found matching the selected filter.</td>
+                    </tr>
                     {% endif %}
+                    {% endif %}
+                    {% empty %}
+                    <tr>
+                        <td colspan="5" style="text-align: center; padding: 2rem; color: #6e6e73;">No patents found matching the selected filter.</td>
+                    </tr>
                     {% endfor %}
                 </tbody>
             </table>
+
+            <!-- Pagination Controls -->
+            {% if total_pages > 1 %}
+            <div id="pagination-controls" style="display: flex; justify-content: center; align-items: center; gap: 1rem; margin-top: 1.5rem; padding: 1rem;">
+                <div style="display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;">
+                    <span style="color: #6e6e73;">Showing {{ page_obj|length }} of {{ total_patent_count }} patents</span>
+
+                    {% if page_obj.has_previous %}
+                    <a href="?page={{ page_obj.previous_page_number }}{% if risk_category %}&risk_category={{ risk_category|urlencode }}{% endif %}{% if sub_risk %}&sub_risk={{ sub_risk|urlencode }}{% endif %}{% if selected_search %}&search_id={{ selected_search.id }}{% endif %}" style="padding: 0.5rem 1rem; background: #0071e3; color: white; border: none; border-radius: 8px; cursor: pointer; text-decoration: none;">Previous</a>
+                    {% else %}
+                    <button disabled style="padding: 0.5rem 1rem; background: #ccc; color: #666; border: none; border-radius: 8px; cursor: not-allowed;">Previous</button>
+                    {% endif %}
+
+                    <span style="font-weight: 600;">Page {{ page }} of {{ total_pages }}</span>
+
+                    {% if page_obj.has_next %}
+                    <a href="?page={{ page_obj.next_page_number }}{% if risk_category %}&risk_category={{ risk_category|urlencode }}{% endif %}{% if sub_risk %}&sub_risk={{ sub_risk|urlencode }}{% endif %}{% if selected_search %}&search_id={{ selected_search.id }}{% endif %}" style="padding: 0.5rem 1rem; background: #0071e3; color: white; border: none; border-radius: 8px; cursor: pointer; text-decoration: none;">Next</a>
+                    {% else %}
+                    <button disabled style="padding: 0.5rem 1rem; background: #ccc; color: #666; border: none; border-radius: 8px; cursor: not-allowed;">Next</button>
+                    {% endif %}
+                </div>
+            </div>
+            {% endif %}
         </div>
 
         {% else %}
@@ -1117,7 +1150,7 @@
             const searchId = urlParams.get('search_id') || '';
             
             // Build the API URL
-            let apiUrl = '/accounts/dashboard/filter/?page=' + page + '&per_page=100';
+            let apiUrl = '/accounts/dashboard/filter/?page=' + page + '&per_page=20';
             if (riskCategory) {
                 apiUrl += '&risk_category=' + encodeURIComponent(riskCategory);
             }

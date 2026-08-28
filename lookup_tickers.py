@@ -10,11 +10,12 @@ This script:
   4. Saves tickers back to the Entity table
 
 Usage:
-  python lookup_tickers.py [--limit N] [--batch-size 50] [--resume]
+  python lookup_tickers.py [--limit N] [--batch-size 50] [--workers 3] [--resume]
 
 Options:
   --limit N         Only process N entities (for testing)
   --batch-size N    Number of names per API call (default: 50)
+  --workers N       Number of parallel API workers (default: 3)
   --resume          Skip entities that already have tickers set
   --no-create       Skip creating Entity records (only lookup existing ones)
   --backend vllm    Use vLLM instead of OpenRouter (default: openrouter)
@@ -27,6 +28,7 @@ import json
 import time
 import re
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')
@@ -61,7 +63,7 @@ def call_llm(prompt, *, backend='openrouter', model=None, temperature=0.1):
             "HTTP-Referer": "https://patentrisk.com",
             "X-Title": "Patent Ticker Lookup",
         }
-        model = model or "deepseek/deepseek-v3.2"
+        model = model or "deepseek/deepseek-v4-flash"
         payload = {
             "model": model,
             "messages": [{"role": "user", "content": prompt}],
@@ -345,7 +347,7 @@ def lookup_tickers_batch(entity_batch, *, backend='openrouter'):
 # ---------------------------------------------------------------------------
 
 def run_ticker_lookup(*, limit=None, batch_size=50, resume=True, create_entities=True,
-                      backend='openrouter'):
+                      backend='openrouter', workers=3):
     """
     Full pipeline:
       1. Extract distinct organization names from patent data
@@ -378,52 +380,85 @@ def run_ticker_lookup(*, limit=None, batch_size=50, resume=True, create_entities
     if limit:
         print(f"  (limited to first {limit})")
 
-    # ---- Step 4: Batch lookup ----
-    print(f"[4/4] Looking up tickers in batches of {batch_size} via {backend}...")
+    # ---- Step 4: Batch lookup in parallel ----
+    print(f"[4/4] Looking up tickers in batches of {batch_size} via {backend} "
+          f"(workers: {workers})...")
+    ticker_start = time.time()
+
+    # Build all batches upfront
+    batches = [entities[i:i + batch_size] for i in range(0, total, batch_size)]
+    total_batches = len(batches)
     analyzed = 0
     errors = 0
     tickers_found = 0
-    ticker_start = time.time()
+    done = 0
 
-    for i in range(0, total, batch_size):
-        batch = entities[i:i + batch_size]
-        batch_num = (i // batch_size) + 1
-        total_batches = (total + batch_size - 1) // batch_size
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        # Submit all API calls in parallel
+        future_map = {}
+        for idx, batch in enumerate(batches):
+            future = executor.submit(lookup_tickers_batch, batch, backend=backend)
+            future_map[future] = (idx, batch)
 
-        try:
-            results = lookup_tickers_batch(batch, backend=backend)
+        # Process results as they complete (main thread saves to DB — no SQLite contention)
+        for future in as_completed(future_map):
+            idx, batch = future_map[future]
+            batch_num = idx + 1
 
-            # Save results to database
-            with transaction.atomic():
+            try:
+                results = future.result()
+
+                # Save results to database (serialized on main thread)
+                batch_found = 0
+                with transaction.atomic():
+                    for entity in batch:
+                        ticker = results.get(entity.entity_id)
+                        if ticker:
+                            entity.ticker = ticker
+                            entity.save(update_fields=['ticker'])
+                            tickers_found += 1
+                            batch_found += 1
+                        else:
+                            entity.ticker = None
+                            entity.save(update_fields=['ticker'])
+
+                analyzed += len(batch)
+                done += 1
+
+                # Print per-batch results
+                name_lines = []
                 for entity in batch:
-                    ticker = results.get(entity.entity_id)
-                    if ticker:
-                        entity.ticker = ticker
-                        entity.save(update_fields=['ticker'])
-                        tickers_found += 1
-                    else:
-                        # Mark as explicitly checked (save null)
-                        entity.ticker = None
-                        entity.save(update_fields=['ticker'])
+                    t = results.get(entity.entity_id)
+                    display_ticker = t if t else "—"
+                    name_lines.append(f"    {entity.name[:65]:<65} → {display_ticker}")
+                total_in_batch = len(batch)
+                if total_in_batch <= 10:
+                    for line in name_lines:
+                        print(line)
+                else:
+                    for line in name_lines[:4]:
+                        print(line)
+                    print(f"    ... ({total_in_batch - 6} more) ...")
+                    for line in name_lines[-2:]:
+                        print(line)
 
-            analyzed += len(batch)
+            except Exception as e:
+                errors += 1
+                print(f"  ERROR batch {batch_num}/{total_batches}: {e}")
+                if errors >= 5:
+                    print("  Too many errors. Cancelling remaining batches...")
+                    for f in future_map:
+                        f.cancel()
+                    break
 
-        except Exception as e:
-            errors += 1
-            print(f"  ERROR batch {batch_num}/{total_batches}: {e}")
-            # Avoid hammering API on repeated failures
-            if errors >= 5:
-                print("  Too many consecutive errors. Stopping.")
-                break
-
-        # Progress report
-        elapsed = time.time() - ticker_start
-        rate = analyzed / elapsed if elapsed > 0 else 0
-        remaining = (total - analyzed) / rate if rate > 0 else 0
-        print(f"  Batch {batch_num}/{total_batches} done | "
-              f"{analyzed}/{total} entities ({rate:.1f}/sec) | "
-              f"{tickers_found} tickers found | "
-              f"~{remaining/60:.1f} min remaining")
+            # Progress report
+            elapsed = time.time() - ticker_start
+            rate = analyzed / elapsed if elapsed > 0 else 0
+            remaining = (total - analyzed) / rate if rate > 0 else 0
+            print(f"  Batch {done}/{total_batches} (orig #{batch_num}) done | "
+                  f"{analyzed}/{total} entities ({rate:.1f}/sec) | "
+                  f"{tickers_found} tickers found | "
+                  f"~{remaining/60:.1f} min remaining")
 
     elapsed = time.time() - ticker_start
     print()
@@ -458,6 +493,8 @@ if __name__ == '__main__':
                         help='Skip creating Entity records')
     parser.add_argument('--backend', choices=['openrouter', 'vllm'], default='openrouter',
                         help='LLM backend to use (default: openrouter)')
+    parser.add_argument('--workers', type=int, default=3,
+                        help='Number of parallel API workers (default: 3)')
 
     args = parser.parse_args()
 
@@ -467,4 +504,5 @@ if __name__ == '__main__':
         resume=args.resume,
         create_entities=not args.no_create,
         backend=args.backend,
+        workers=args.workers,
     )

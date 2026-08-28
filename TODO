@@ -1,0 +1,51 @@
+Hi Jack,
+
+Here is an updated TODO list for the patents website.
+We can set up a meeting if it's convenient. Also if it looks like too much, let's discuss.
+
+Initial load really slow
+New "reports" process instead of "saved search" (confusing)
+In "search" page, you can "generate report" instead of "save search"
+In "home" page, you can "Select an existing report"
+In "home" page, you can also "Quickly generate report for: (stock/company name autocomplete)"
+Remove "cache"
+Why do I need to click "recalculate cache"? Should not have to. If we really need that, then change to "analyse" or "re-generate report" or something
+Why do I get "no patent data yet"? At least there should be a button to "analyse"
+Numbers display above bars (instead of when hovering, to avoid problems with low-N risks)
+It might make sense to use another plot library that is lighter, we don't need so many buttons
+Company name bugs 
+Why are certain companies not showing up in auto-complete, while others show up but have nothing
+Why is "Google" and "GOOGLE" the same set of patents?
+Why does the combination of both Google/GOOGLE show no patents, while each independently shows 500+
+Time graphs with risk types
+Let's have, for each bar plot, an "over time" plot on the side which has curves for "total" and for each category in the bar plot
+In "home" page (or new page if easier), add section to list top-risky companies (sorted by N or % patents)
+Would look similar to "Patents with risks" section so you can filter by risk type, but the list is of companies (owners), sorted by N or % risky patents
+Add pages: about (clean page with 3 headers and dummy text), and site-stats (#users, #reports)
+Add copyright in footer
+Search keywords not subkeywords (there is no car in carpet)
+Include more patents
+Tell me which keywords we are using so far to include patents
+Tell me process for adding more keywords for patent inclusion
+Add patents with these keywords: zero-click access, real-time intelligence, silent infection, lawful interception, offensive cyber solution, data recover platform, digital forensics, investigative analytics, IMSI catcher, stingray, tactical interception, GSM interception, content policy enforcement, website filtering, network traffic management
+Button to toggle between displaying N patents and % patents on the graphs
+
+Cheers
+Martim
+
+
+Hi Martim, 
+
+Thanks for the list I will work through it. 
+
+All the UI quick fixes can be done for sure. 
+Point 1 unless I find exactly what’s causing it, that might have to stay as it might be a difficult optimisation problem that is out of scope
+Point 5 I will make sure that the USPTO data that I do have is consistent (and I do suspect that I have made a couple of data handling errors that I can fix) but I will not fix USPTO data inconsistencies
+All points about “companies” will be limited to a not 100% accurate estimation of a stock ticker - due to difficulties in defining the entity “company” from the applicants of patents (that include individuals) and the different subsidiaries of one “company”. 
+Point 8 I am happy to do if it’s a quick add-on but if it’s difficult to do, then I think it’s out of scope
+Point 11 I can explain in text and provide the code and manual process I used, but I will not improve the system. 
+
+I hope this all makes sense! 
+
+Thanks,
+Jack 

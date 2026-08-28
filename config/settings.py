@@ -11,10 +11,10 @@ SECRET_KEY = 'django-insecure-change-this-in-production'
 
 DEBUG = True
 
-ALLOWED_HOSTS = ['*']
+ALLOWED_HOSTS = ['*','patentriskradar.com','www.patentriskradar.com']
 
 # Allow Cloudflare Tunnel subdomains for CSRF origin checking
-CSRF_TRUSTED_ORIGINS = ['https://*.trycloudflare.com']
+CSRF_TRUSTED_ORIGINS = ['https://*.trycloudflare.com','https://patentriskradar.com']
 
 # HTTPS/SSL settings — only apply when DEBUG=False (production via Cloudflare Tunnel)
 # Cloudflare terminates SSL at the edge and forwards HTTP to port 8080
