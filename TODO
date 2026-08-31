@@ -23,7 +23,7 @@ In "home" page (or new page if easier), add section to list top-risky companies 
 Would look similar to "Patents with risks" section so you can filter by risk type, but the list is of companies (owners), sorted by N or % risky patents
 Add pages: about (clean page with 3 headers and dummy text), and site-stats (#users, #reports)
 Add copyright in footer
-Search keywords not subkeywords (there is no car in carpet)
+[DONE] Search keywords not subkeywords (there is no car in carpet)
 Include more patents
 Tell me which keywords we are using so far to include patents
 Tell me process for adding more keywords for patent inclusion

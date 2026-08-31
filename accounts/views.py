@@ -111,6 +111,34 @@ def _parse_json_response(raw_response):
     return normalized_risks
 
 
+def _build_query_filter(query):
+    """
+    Build a Q object for filtering patents by general search query.
+    Uses word-boundary matching on title and abstract so that 'car'
+    does not match 'carpet'. publication_number retains substring
+    matching since patent numbers are identifiers.
+    All words in a multi-word query must appear as whole words in
+    the same field for that field to match.
+    Boundaries use negative lookarounds on letters only: (?<![a-zA-Z])
+    and (?![a-zA-Z]), which correctly handles terms with non-letter
+    characters like "C++".
+    """
+    words = query.strip().split()
+    if not words:
+        return Q()
+
+    title_q = Q()
+    abstract_q = Q()
+    for word in words:
+        escaped = re.escape(word)
+        pattern = r'(?<![a-zA-Z])' + escaped + r'(?![a-zA-Z])'
+        title_q &= Q(title__iregex=pattern)
+        abstract_q &= Q(abstract__iregex=pattern)
+
+    pub_q = Q(publication_number__icontains=query)
+    return (title_q | abstract_q | pub_q)
+
+
 def landing(request):
     """Landing page - shows login/register for unauthenticated users, redirects to dashboard for authenticated."""
     if request.user.is_authenticated:
@@ -449,7 +477,7 @@ def _get_total_patents_for_search(selected_search, selected_search_id):
         if selected_search.assignee:
             q |= Q(entities__name__icontains=selected_search.assignee, entities__entity_type='assignee')
         if selected_search.query:
-            q |= Q(title__icontains=selected_search.query)
+            q |= _build_query_filter(selected_search.query)
     
     if q:
         return Patent.objects.filter(q).distinct().count()
@@ -582,7 +610,7 @@ def _dashboard_compute(request, saved_searches, selected_search_id, selected_sea
             if selected_search.assignee:
                 q |= Q(entities__name__icontains=selected_search.assignee, entities__entity_type='assignee')
             if selected_search.query:
-                q |= Q(title__icontains=selected_search.query)
+                q |= _build_query_filter(selected_search.query)
             
             if q:
                 matching_patents = Patent.objects.filter(q).distinct()
@@ -895,7 +923,7 @@ def recalculate_cache(request):
             if selected_search.assignee:
                 q |= Q(entities__name__icontains=selected_search.assignee, entities__entity_type='assignee')
             if selected_search.query:
-                q |= Q(title__icontains=selected_search.query)
+                q |= _build_query_filter(selected_search.query)
             
             if q:
                 matching_patents = Patent.objects.filter(q).distinct()
@@ -1369,11 +1397,7 @@ def search_patents(request):
     
     # Filter by general query (title, abstract, publication number)
     if query:
-        patents = patents.filter(
-            Q(title__icontains=query) |
-            Q(abstract__icontains=query) |
-            Q(publication_number__icontains=query)
-        )
+        patents = patents.filter(_build_query_filter(query))
     
     # Filter by multiple inventors (comma-separated) - OR logic
     if inventor:
@@ -1551,11 +1575,7 @@ def _run_background_analysis(saved_search_id, user_id):
         assignee = saved_search.assignee
         
         if query:
-            patents = patents.filter(
-                Q(title__icontains=query) |
-                Q(abstract__icontains=query) |
-                Q(publication_number__icontains=query)
-            )
+            patents = patents.filter(_build_query_filter(query))
         
         if inventor:
             patents = patents.filter(
@@ -1644,11 +1664,7 @@ def analyse_all_patents(request):
         patents = Patent.objects.all()
         
         if query:
-            patents = patents.filter(
-                Q(title__icontains=query) |
-                Q(abstract__icontains=query) |
-                Q(publication_number__icontains=query)
-            )
+            patents = patents.filter(_build_query_filter(query))
         
         if inventor:
             patents = patents.filter(
